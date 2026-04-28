@@ -24,7 +24,6 @@ hr {
     margin: 0.35rem 0;
 }
 
-/* Input verde */
 div[data-baseweb="input"] input {
     border: 2px solid #28a745 !important;
     box-shadow: none !important;
@@ -194,59 +193,63 @@ col_precio = {
 }[tarifa]
 
 
-busqueda = st.text_input("Buscar", placeholder="Ej: anilla, atún, calamar...")
+busqueda = st.text_input("Buscar", placeholder="Ej: anilla, atún, calamar...").strip()
 
 if busqueda:
     resultados = df[
         df["DESCRIPCION"].astype(str).str.contains(busqueda, case=False, na=False)
-    ].reset_index(drop=True)
+    ].copy()
+else:
+    resultados = df.copy()
 
-    if resultados.empty:
-        st.warning("No se encontró ningún producto")
-    else:
-        for i, fila in resultados.iterrows():
-            codigo = str(fila["CODIGO"])
-            descripcion = str(fila["DESCRIPCION"])
-            formato = str(fila["FORMATO"])
-            precio = float(fila[col_precio])
+resultados = resultados.sort_values("DESCRIPCION").reset_index(drop=True)
 
-            key_cajas = f"cajas_{i}_{codigo}_{tarifa}_{busqueda}"
-            key_add = f"add_{i}_{codigo}_{tarifa}_{busqueda}"
+if resultados.empty:
+    st.warning("No se encontró ningún producto")
+else:
+    for i, fila in resultados.iterrows():
+        codigo = str(fila["CODIGO"])
+        descripcion = str(fila["DESCRIPCION"])
+        formato = str(fila["FORMATO"])
+        precio = float(fila[col_precio])
 
-            st.markdown(
-                f"""
-                <div class="producto">
-                    <b>{descripcion}</b> · {euros(precio)} € · {formato}
-                </div>
-                """,
-                unsafe_allow_html=True
+        key_cajas = f"cajas_{i}_{codigo}_{tarifa}_{busqueda}"
+        key_add = f"add_{i}_{codigo}_{tarifa}_{busqueda}"
+
+        st.markdown(
+            f"""
+            <div class="producto">
+                <b>{descripcion}</b> · {euros(precio)} € · {formato}
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        col_cajas, col_add = st.columns([1, 1])
+
+        with col_cajas:
+            cajas = st.number_input(
+                "Cajas",
+                min_value=1,
+                value=1,
+                step=1,
+                key=key_cajas,
+                label_visibility="collapsed"
             )
 
-            col_cajas, col_add = st.columns([1, 1])
+        with col_add:
+            texto_boton = "Añadido" if key_add in st.session_state.productos_anadidos else "Añadir"
 
-            with col_cajas:
-                cajas = st.number_input(
-                    "Cajas",
-                    min_value=1,
-                    value=1,
-                    step=1,
-                    key=key_cajas,
-                    label_visibility="collapsed"
-                )
+            if st.button(texto_boton, key=key_add):
+                st.session_state.pedido.append({
+                    "cajas": int(cajas),
+                    "codigo": codigo,
+                    "descripcion": descripcion,
+                    "precio": precio,
+                    "formato": formato,
+                    "tarifa": tarifa,
+                })
+                st.session_state.productos_anadidos.add(key_add)
+                st.rerun()
 
-            with col_add:
-                texto_boton = "Añadido" if key_add in st.session_state.productos_anadidos else "Añadir"
-
-                if st.button(texto_boton, key=key_add):
-                    st.session_state.pedido.append({
-                        "cajas": int(cajas),
-                        "codigo": codigo,
-                        "descripcion": descripcion,
-                        "precio": precio,
-                        "formato": formato,
-                        "tarifa": tarifa,
-                    })
-                    st.session_state.productos_anadidos.add(key_add)
-                    st.rerun()
-
-            st.markdown("---")
+        st.markdown("---")
