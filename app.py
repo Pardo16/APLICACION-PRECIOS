@@ -38,12 +38,24 @@ div[data-baseweb="input"] input:focus {
 }
 
 .stButton button {
-    background-color: white;
-    color: black;
+    background-color: white !important;
+    color: black !important;
     border-radius: 8px;
     width: 100%;
     padding: 0.25rem 0.45rem;
     font-size: 0.85rem;
+}
+
+a {
+    color: black !important;
+    background-color: white !important;
+}
+
+div[data-testid="stLinkButton"] a {
+    color: black !important;
+    background-color: white !important;
+    border: 1px solid #999 !important;
+    border-radius: 8px !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -94,7 +106,7 @@ def crear_texto_pedido(nombre_cliente, pedido):
         total += item["cajas"]
         lineas.append(
             f"- {item['cajas']} cajas | {item['descripcion']} | "
-            f"{euros(item['precio'])} € | {item['formato']}"
+            f"{euros(item['precio'])} € | {item['formato']} | {item['tarifa']}"
         )
 
     lineas.append("")
@@ -234,7 +246,7 @@ else:
         product_id = str(fila["PRODUCT_ID"])
 
         key_cajas = f"cajas_{product_id}_{tarifa}"
-        key_add = f"add_{product_id}_{tarifa}"
+        key_add = f"add_{product_id}_{tarifa}_{precio}"
 
         st.markdown(
             f"""
