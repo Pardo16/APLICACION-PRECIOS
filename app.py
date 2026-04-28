@@ -126,6 +126,9 @@ if "productos_anadidos" not in st.session_state:
 if "ver_pedido" not in st.session_state:
     st.session_state.ver_pedido = False
 
+if "tarifa_actual" not in st.session_state:
+    st.session_state.tarifa_actual = "Coste"
+
 
 nombre_cliente = st.text_input(
     "Cliente",
@@ -213,7 +216,8 @@ else:
 tarifa = st.radio(
     "Tarifa",
     ["Coste", "Cliente final", "Alta distribución", "Hostelería"],
-    horizontal=True
+    horizontal=True,
+    key="tarifa_actual"
 )
 
 col_precio = {
@@ -245,8 +249,8 @@ else:
         precio = float(fila[col_precio])
         product_id = str(fila["PRODUCT_ID"])
 
-        key_cajas = f"cajas_{product_id}_{tarifa}"
-        key_add = f"add_{product_id}_{tarifa}_{precio}"
+        key_cajas = f"cajas_{product_id}"
+        key_add = f"add_{product_id}_{tarifa}"
 
         st.markdown(
             f"""
