@@ -95,8 +95,11 @@ if "pedido" not in st.session_state:
 if "nombre_cliente" not in st.session_state:
     st.session_state.nombre_cliente = ""
 
-if "ultimo_anadido" not in st.session_state:
-    st.session_state.ultimo_anadido = ""
+if "productos_anadidos" not in st.session_state:
+    st.session_state.productos_anadidos = set()
+
+if "ver_pedido" not in st.session_state:
+    st.session_state.ver_pedido = False
 
 
 nombre_cliente = st.text_input(
@@ -146,19 +149,33 @@ if st.session_state.pedido:
     total = sum(item["cajas"] for item in st.session_state.pedido)
     st.success(f"{len(st.session_state.pedido)} productos | {total} cajas")
 
-    texto = crear_texto_pedido(st.session_state.nombre_cliente, st.session_state.pedido)
-    url = "https://wa.me/?text=" + quote(texto)
-
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
 
     with col1:
-        st.link_button("Finalizar pedido", url)
+        if st.button("Ver pedido"):
+            st.session_state.ver_pedido = not st.session_state.ver_pedido
+            st.rerun()
 
     with col2:
+        texto = crear_texto_pedido(st.session_state.nombre_cliente, st.session_state.pedido)
+        url = "https://wa.me/?text=" + quote(texto)
+        st.link_button("Finalizar", url)
+
+    with col3:
         if st.button("Vaciar"):
             st.session_state.pedido = []
-            st.session_state.ultimo_anadido = ""
+            st.session_state.productos_anadidos = set()
+            st.session_state.ver_pedido = False
             st.rerun()
+
+    if st.session_state.ver_pedido:
+        texto = crear_texto_pedido(st.session_state.nombre_cliente, st.session_state.pedido)
+        st.text_area("Pedido actual", texto, height=220)
+
+        if st.button("Continuar pedido"):
+            st.session_state.ver_pedido = False
+            st.rerun()
+
 else:
     st.info(f"Pedido vacío | {st.session_state.nombre_cliente}")
 
@@ -218,7 +235,7 @@ if busqueda:
                 )
 
             with col_add:
-                texto_boton = "Añadido" if st.session_state.ultimo_anadido == key_add else "Añadir"
+                texto_boton = "Añadido" if key_add in st.session_state.productos_anadidos else "Añadir"
 
                 if st.button(texto_boton, key=key_add):
                     st.session_state.pedido.append({
@@ -229,7 +246,7 @@ if busqueda:
                         "formato": formato,
                         "tarifa": tarifa,
                     })
-                    st.session_state.ultimo_anadido = key_add
+                    st.session_state.productos_anadidos.add(key_add)
                     st.rerun()
 
             st.markdown("---")
