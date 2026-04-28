@@ -2,65 +2,51 @@ import streamlit as st
 import pandas as pd
 from pathlib import Path
 from urllib.parse import quote
-import hashlib
 
-st.set_page_config(page_title="Precios Pescados Pardo", page_icon="🐟", layout="centered")
-
-MAX_PRODUCTOS = 80
-
-st.markdown("""
-<style>
-.stApp {background-color: #d8f5f2; color: black;}
-h1, h2, h3, h4, h5, h6, p, div, span, label {color: black !important;}
-
-.block-container {
-    padding-top: 0.5rem;
-    padding-bottom: 0.5rem;
-}
-
-.producto {
-    font-size: 0.9rem;
-    line-height: 1.2;
-    margin-bottom: 0.25rem;
-}
-
-hr {margin: 0.35rem 0;}
-
-div[data-baseweb="input"] input {
-    border: 2px solid #28a745 !important;
-    background-color: white !important;
-    color: black !important;
-}
-
-div[data-baseweb="input"] input:focus {
-    border: 2px solid #28a745 !important;
-    box-shadow: 0 0 0 1px #28a745 !important;
-}
-
-.stButton button {
-    background-color: white !important;
-    color: black !important;
-    border-radius: 8px;
-    width: 100%;
-    padding: 0.25rem 0.45rem;
-    font-size: 0.85rem;
-}
-
-div[data-testid="stLinkButton"] a {
-    color: black !important;
-    background-color: white !important;
-    border: 1px solid #999 !important;
-    border-radius: 8px !important;
-}
-</style>
-""", unsafe_allow_html=True)
+st.set_page_config(
+    page_title="Precios Pescados Pardo",
+    page_icon="🐟",
+    layout="centered"
+)
 
 st.markdown("#### 🐟 Precios Pescados Pardo")
 
+st.markdown("""
+<style>
+.block-container {padding-top: 0.6rem; padding-bottom: 0.6rem;}
+div[data-testid="stVerticalBlock"] {gap: 0.25rem;}
+hr {margin: 0.3rem 0;}
+.stButton button {padding: 0.25rem 0.5rem; font-size: 0.85rem;}
+.producto {font-size: 0.88rem; line-height: 1.15;}
+</style>
+""", unsafe_allow_html=True)
 
-def buscar_excel():
-    archivos_excel = list(Path(".").glob("*.xlsx")) + list(Path(".").glob("*.xls"))
-    return archivos_excel[0] if archivos_excel else None
+
+# =========================
+# CONFIGURACIÓN TARIFAS
+# =========================
+
+TARIFAS = {
+    "1": "PRECIO",
+    "2": "CLIENTE FINAL",
+    "3": "ALTA DISTRIBUCION",
+    "4": "HOSTELERIA",
+}
+
+
+# =========================
+# FUNCIONES
+# =========================
+
+def buscar_excel_tarifa():
+    archivos = list(Path(".").glob("*.xlsx")) + list(Path(".").glob("*.xls"))
+    archivos = [a for a in archivos if a.name.lower() != "clientes.xlsx"]
+    return archivos[0] if archivos else None
+
+
+def buscar_excel_clientes():
+    archivo = Path("clientes.xlsx")
+    return archivo if archivo.exists() else None
 
 
 def limpiar_precio(valor):
@@ -70,19 +56,16 @@ def limpiar_precio(valor):
     if isinstance(valor, (int, float)):
         return float(valor)
 
-    texto = str(valor).strip()
-    texto = texto.replace("€", "")
-    texto = texto.replace(" ", "")
+    texto = str(valor).strip().replace("€", "").replace(" ", "")
 
     if "," in texto and "." not in texto:
         texto = texto.replace(",", ".")
     elif "," in texto and "." in texto:
-        texto = texto.replace(".", "")
-        texto = texto.replace(",", ".")
+        texto = texto.replace(".", "").replace(",", ".")
 
     try:
         return float(texto)
-    except Exception:
+    except:
         return None
 
 
@@ -90,20 +73,15 @@ def euros(valor):
     return f"{float(valor):.2f}".replace(".", ",")
 
 
-def crear_id_producto(codigo, descripcion, formato):
-    base = f"{codigo}|{descripcion}|{formato}"
-    return hashlib.md5(base.encode("utf-8")).hexdigest()
-
-
-def crear_texto_pedido(nombre_cliente, pedido):
-    lineas = ["PEDIDO", f"Cliente: {nombre_cliente}", ""]
+def crear_texto_pedido(cliente, pedido):
+    lineas = ["PEDIDO", f"Cliente: {cliente}", ""]
     total = 0
 
     for item in pedido:
         total += item["cajas"]
         lineas.append(
             f"- {item['cajas']} cajas | {item['descripcion']} | "
-            f"{euros(item['precio'])} € | {item['formato']} | {item['tarifa']}"
+            f"{euros(item['precio'])} € | {item['formato']}"
         )
 
     lineas.append("")
@@ -111,176 +89,241 @@ def crear_texto_pedido(nombre_cliente, pedido):
     return "\n".join(lineas)
 
 
+def cargar_clientes():
+    archivo = buscar_excel_clientes()
+
+    if archivo is None:
+        st.error("No encuentro el archivo clientes.xlsx en GitHub.")
+        st.stop()
+
+    clientes = pd.read_excel(archivo)
+    clientes.columns = clientes.columns.astype(str).str.strip().str.upper()
+
+    columnas = ["N_CLIENTE", "CLIENTE", "CONTRASEÑA", "TARIFA"]
+    faltan = [c for c in columnas if c not in clientes.columns]
+
+    if faltan:
+        st.error(f"Faltan columnas en clientes.xlsx: {faltan}")
+        st.write("Columnas encontradas:", list(clientes.columns))
+        st.stop()
+
+    clientes["N_CLIENTE"] = clientes["N_CLIENTE"].astype(str).str.strip()
+    clientes["CONTRASEÑA"] = clientes["CONTRASEÑA"].astype(str).str.strip()
+    clientes["TARIFA"] = clientes["TARIFA"].astype(str).str.strip().str.upper()
+
+    return clientes
+
+
+def cargar_tarifa():
+    archivo = buscar_excel_tarifa()
+
+    if archivo is None:
+        st.error("No encuentro ningún Excel de tarifa en GitHub.")
+        st.stop()
+
+    df = pd.read_excel(archivo)
+    df.columns = df.columns.astype(str).str.strip().str.upper()
+
+    columnas = ["CODIGO", "DESCRIPCION", "FORMATO", "PRECIO"]
+    faltan = [c for c in columnas if c not in df.columns]
+
+    if faltan:
+        st.error(f"Faltan columnas en el Excel de tarifa: {faltan}")
+        st.write("Columnas encontradas:", list(df.columns))
+        st.stop()
+
+    df["PRECIO"] = df["PRECIO"].apply(limpiar_precio)
+    df = df.dropna(subset=["PRECIO"])
+
+    df["CLIENTE FINAL"] = df["PRECIO"] / 0.55
+    df["ALTA DISTRIBUCION"] = df["PRECIO"] / 0.90
+    df["HOSTELERIA"] = df["PRECIO"] / 0.80
+
+    for col in ["PRECIO", "CLIENTE FINAL", "ALTA DISTRIBUCION", "HOSTELERIA"]:
+        df[col] = df[col].round(2)
+
+    return df
+
+
+# =========================
+# ESTADO
+# =========================
+
+if "logueado" not in st.session_state:
+    st.session_state.logueado = False
+
 if "pedido" not in st.session_state:
     st.session_state.pedido = []
 
-if "nombre_cliente" not in st.session_state:
-    st.session_state.nombre_cliente = ""
+if "cliente" not in st.session_state:
+    st.session_state.cliente = ""
 
-if "productos_anadidos" not in st.session_state:
-    st.session_state.productos_anadidos = set()
+if "n_cliente" not in st.session_state:
+    st.session_state.n_cliente = ""
 
-if "ver_pedido" not in st.session_state:
-    st.session_state.ver_pedido = False
+if "tarifa_cliente" not in st.session_state:
+    st.session_state.tarifa_cliente = ""
 
 
-nombre_cliente = st.text_input(
-    "Cliente",
-    value=st.session_state.nombre_cliente,
-    placeholder="Nombre del cliente"
-)
+# =========================
+# LOGIN
+# =========================
 
-st.session_state.nombre_cliente = nombre_cliente.strip()
+if not st.session_state.logueado:
+    st.markdown("### Acceso cliente")
 
-if not st.session_state.nombre_cliente:
-    st.warning("Escribe el nombre del cliente")
+    n_cliente = st.text_input("Nº cliente")
+    password = st.text_input("Contraseña", type="password")
+
+    if st.button("Entrar"):
+        clientes = cargar_clientes()
+
+        usuario = clientes[
+            (clientes["N_CLIENTE"] == str(n_cliente).strip()) &
+            (clientes["CONTRASEÑA"] == str(password).strip())
+        ]
+
+        if usuario.empty:
+            st.error("Nº cliente o contraseña incorrectos.")
+        else:
+            usuario = usuario.iloc[0]
+
+            st.session_state.logueado = True
+            st.session_state.n_cliente = str(usuario["N_CLIENTE"])
+            st.session_state.cliente = str(usuario["CLIENTE"])
+            st.session_state.tarifa_cliente = str(usuario["TARIFA"]).upper()
+            st.session_state.pedido = []
+
+            st.rerun()
+
     st.stop()
 
 
-archivo = buscar_excel()
+# =========================
+# APP
+# =========================
 
-if archivo is None:
-    st.error("No hay Excel en el repositorio")
-    st.stop()
+df = cargar_tarifa()
 
+st.success(f"Cliente: {st.session_state.cliente}")
 
-df = pd.read_excel(archivo)
-df.columns = df.columns.astype(str).str.strip().str.upper()
-
-columnas_necesarias = ["CODIGO", "DESCRIPCION", "FORMATO", "PRECIO"]
-faltan = [col for col in columnas_necesarias if col not in df.columns]
-
-if faltan:
-    st.error(f"Faltan columnas: {faltan}")
-    st.write("Columnas encontradas:", list(df.columns))
-    st.stop()
+if st.button("Cerrar sesión"):
+    st.session_state.logueado = False
+    st.session_state.pedido = []
+    st.session_state.cliente = ""
+    st.session_state.n_cliente = ""
+    st.session_state.tarifa_cliente = ""
+    st.rerun()
 
 
-df["CODIGO"] = df["CODIGO"].astype(str)
-df["DESCRIPCION"] = df["DESCRIPCION"].astype(str)
-df["FORMATO"] = df["FORMATO"].astype(str)
-
-df["COSTE"] = df["PRECIO"].apply(limpiar_precio)
-df = df.dropna(subset=["COSTE"]).copy()
-
-df["CLIENTE FINAL"] = (df["COSTE"] / 0.55).round(2)
-df["ALTA DISTRIBUCION"] = (df["COSTE"] / 0.90).round(2)
-df["HOSTELERIA"] = (df["COSTE"] / 0.80).round(2)
-df["COSTE"] = df["COSTE"].round(2)
-
-df["PRODUCT_ID"] = df.apply(
-    lambda row: crear_id_producto(row["CODIGO"], row["DESCRIPCION"], row["FORMATO"]),
-    axis=1
-)
-
+# =========================
+# PEDIDO
+# =========================
 
 if st.session_state.pedido:
     total = sum(item["cajas"] for item in st.session_state.pedido)
     st.success(f"{len(st.session_state.pedido)} productos | {total} cajas")
 
-    col1, col2, col3 = st.columns(3)
+    texto = crear_texto_pedido(
+        st.session_state.cliente,
+        st.session_state.pedido
+    )
+
+    url = "https://wa.me/?text=" + quote(texto)
+
+    col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("Ver pedido"):
-            st.session_state.ver_pedido = not st.session_state.ver_pedido
-            st.rerun()
+        st.link_button("Finalizar pedido", url)
 
     with col2:
-        texto = crear_texto_pedido(st.session_state.nombre_cliente, st.session_state.pedido)
-        url = "https://wa.me/?text=" + quote(texto)
-        st.link_button("Finalizar", url)
-
-    with col3:
         if st.button("Vaciar"):
             st.session_state.pedido = []
-            st.session_state.productos_anadidos = set()
-            st.session_state.ver_pedido = False
-            st.rerun()
-
-    if st.session_state.ver_pedido:
-        texto = crear_texto_pedido(st.session_state.nombre_cliente, st.session_state.pedido)
-        st.text_area("Pedido actual", texto, height=220)
-
-        if st.button("Continuar pedido"):
-            st.session_state.ver_pedido = False
             st.rerun()
 else:
-    st.info(f"Pedido vacío | {st.session_state.nombre_cliente}")
+    st.info("Pedido vacío")
 
 
-tarifa = st.radio(
-    "Tarifa",
-    ["Coste", "Cliente final", "Alta distribución", "Hostelería"],
-    horizontal=True
-)
+# =========================
+# TARIFA
+# =========================
 
-columna_precio = {
-    "Coste": "COSTE",
-    "Cliente final": "CLIENTE FINAL",
-    "Alta distribución": "ALTA DISTRIBUCION",
-    "Hostelería": "HOSTELERIA",
-}[tarifa]
+tarifa_cliente = st.session_state.tarifa_cliente
+
+if tarifa_cliente == "TODAS":
+    tarifa_visible = st.radio(
+        "Tarifa",
+        ["1", "2", "3", "4"],
+        horizontal=True,
+        format_func=lambda x: f"Tarifa {x}"
+    )
+else:
+    tarifa_visible = tarifa_cliente
+    st.info(f"Tarifa {tarifa_visible}")
+
+if tarifa_visible not in TARIFAS:
+    st.error("La tarifa asignada no es válida. Usa 1, 2, 3, 4 o TODAS en clientes.xlsx.")
+    st.stop()
+
+col_precio = TARIFAS[tarifa_visible]
 
 
-busqueda = st.text_input("Buscar", placeholder="Ej: anilla, atún, calamar...").strip()
+# =========================
+# BUSCADOR
+# =========================
+
+busqueda = st.text_input("Buscar", placeholder="Ej: anilla, atún, calamar...")
 
 if busqueda:
     resultados = df[
-        df["DESCRIPCION"].str.contains(busqueda, case=False, na=False)
-    ].copy()
-else:
-    resultados = df.copy()
+        df["DESCRIPCION"].astype(str).str.contains(busqueda, case=False, na=False)
+    ].reset_index(drop=True)
 
-resultados = resultados.sort_values("DESCRIPCION").head(MAX_PRODUCTOS)
+    if resultados.empty:
+        st.warning("No se encontró ningún producto")
+    else:
+        for i, fila in resultados.iterrows():
+            codigo = str(fila["CODIGO"])
+            descripcion = str(fila["DESCRIPCION"])
+            formato = str(fila["FORMATO"])
+            precio = float(fila[col_precio])
 
-if resultados.empty:
-    st.warning("No se encontró ningún producto")
-else:
-    for _, fila in resultados.iterrows():
-        codigo = str(fila["CODIGO"])
-        descripcion = str(fila["DESCRIPCION"])
-        formato = str(fila["FORMATO"])
-        product_id = str(fila["PRODUCT_ID"])
+            key = f"cajas_{i}_{codigo}_{tarifa_visible}_{busqueda}"
 
-        precio_actual = float(fila[columna_precio])
+            if key not in st.session_state:
+                st.session_state[key] = 1
 
-        key_cajas = f"cajas_{product_id}"
-        key_add = f"add_{product_id}_{tarifa}"
-
-        st.markdown(
-            f"""
-            <div class="producto">
-                <b>{descripcion}</b> · {euros(precio_actual)} € · {formato}
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-        col_cajas, col_add = st.columns([1, 1])
-
-        with col_cajas:
-            cajas = st.number_input(
-                "Cajas",
-                min_value=1,
-                value=1,
-                step=1,
-                key=key_cajas,
-                label_visibility="collapsed"
+            st.markdown(
+                f"""
+                <div class="producto">
+                    <b>{descripcion}</b> · {euros(precio)} € · {formato}
+                </div>
+                """,
+                unsafe_allow_html=True
             )
 
-        with col_add:
-            texto_boton = "Añadido" if key_add in st.session_state.productos_anadidos else "Añadir"
+            col1, col2 = st.columns([1, 1])
 
-            if st.button(texto_boton, key=key_add):
-                st.session_state.pedido.append({
-                    "cajas": int(cajas),
-                    "codigo": codigo,
-                    "descripcion": descripcion,
-                    "precio": precio_actual,
-                    "formato": formato,
-                    "tarifa": tarifa,
-                })
-                st.session_state.productos_anadidos.add(key_add)
-                st.rerun()
+            with col1:
+                cajas = st.number_input(
+                    "Cajas",
+                    min_value=1,
+                    value=st.session_state[key],
+                    step=1,
+                    key=key,
+                    label_visibility="collapsed"
+                )
 
-        st.markdown("---")
+            with col2:
+                if st.button("Añadir", key=f"add_{i}_{codigo}_{tarifa_visible}_{busqueda}"):
+                    st.session_state.pedido.append({
+                        "cajas": int(cajas),
+                        "codigo": codigo,
+                        "descripcion": descripcion,
+                        "precio": precio,
+                        "formato": formato,
+                        "tarifa": tarifa_visible,
+                    })
+                    st.rerun()
+
+            st.markdown("---")
