@@ -2,15 +2,16 @@ import streamlit as st
 import pandas as pd
 from pathlib import Path
 from urllib.parse import quote
+import hashlib
 
 st.set_page_config(page_title="Precios Pescados Pardo", page_icon="🐟", layout="centered")
 
-MAX_PRODUCTOS = 60
+MAX_PRODUCTOS = 80
 
 st.markdown("""
 <style>
 .stApp {background-color: #d8f5f2; color: black;}
-h1, h2, h3, h4, h5, h6, p, div, span {color: black !important;}
+h1, h2, h3, h4, h5, h6, p, div, span, label {color: black !important;}
 
 .block-container {
     padding-top: 0.5rem;
@@ -69,21 +70,29 @@ def limpiar_precio(valor):
     if isinstance(valor, (int, float)):
         return float(valor)
 
-    texto = str(valor).strip().replace("€", "").replace(" ", "")
+    texto = str(valor).strip()
+    texto = texto.replace("€", "")
+    texto = texto.replace(" ", "")
 
     if "," in texto and "." not in texto:
         texto = texto.replace(",", ".")
     elif "," in texto and "." in texto:
-        texto = texto.replace(".", "").replace(",", ".")
+        texto = texto.replace(".", "")
+        texto = texto.replace(",", ".")
 
     try:
         return float(texto)
-    except:
+    except Exception:
         return None
 
 
 def euros(valor):
     return f"{float(valor):.2f}".replace(".", ",")
+
+
+def crear_id_producto(codigo, descripcion, formato):
+    base = f"{codigo}|{descripcion}|{formato}"
+    return hashlib.md5(base.encode("utf-8")).hexdigest()
 
 
 def crear_texto_pedido(nombre_cliente, pedido):
@@ -147,15 +156,22 @@ if faltan:
     st.stop()
 
 
-df["PRECIO"] = df["PRECIO"].apply(limpiar_precio)
-df = df.dropna(subset=["PRECIO"]).reset_index(drop=True)
+df["CODIGO"] = df["CODIGO"].astype(str)
+df["DESCRIPCION"] = df["DESCRIPCION"].astype(str)
+df["FORMATO"] = df["FORMATO"].astype(str)
 
-df["PRODUCT_ID"] = df.index.astype(str)
+df["COSTE"] = df["PRECIO"].apply(limpiar_precio)
+df = df.dropna(subset=["COSTE"]).copy()
 
-df["CLIENTE FINAL"] = (df["PRECIO"] / 0.55).round(2)
-df["ALTA DISTRIBUCION"] = (df["PRECIO"] / 0.90).round(2)
-df["HOSTELERIA"] = (df["PRECIO"] / 0.80).round(2)
-df["PRECIO"] = df["PRECIO"].round(2)
+df["CLIENTE FINAL"] = (df["COSTE"] / 0.55).round(2)
+df["ALTA DISTRIBUCION"] = (df["COSTE"] / 0.90).round(2)
+df["HOSTELERIA"] = (df["COSTE"] / 0.80).round(2)
+df["COSTE"] = df["COSTE"].round(2)
+
+df["PRODUCT_ID"] = df.apply(
+    lambda row: crear_id_producto(row["CODIGO"], row["DESCRIPCION"], row["FORMATO"]),
+    axis=1
+)
 
 
 if st.session_state.pedido:
@@ -198,21 +214,19 @@ tarifa = st.radio(
     horizontal=True
 )
 
-mapa_tarifas = {
-    "Coste": "PRECIO",
+columna_precio = {
+    "Coste": "COSTE",
     "Cliente final": "CLIENTE FINAL",
     "Alta distribución": "ALTA DISTRIBUCION",
     "Hostelería": "HOSTELERIA",
-}
-
-col_precio = mapa_tarifas[tarifa]
+}[tarifa]
 
 
 busqueda = st.text_input("Buscar", placeholder="Ej: anilla, atún, calamar...").strip()
 
 if busqueda:
     resultados = df[
-        df["DESCRIPCION"].astype(str).str.contains(busqueda, case=False, na=False)
+        df["DESCRIPCION"].str.contains(busqueda, case=False, na=False)
     ].copy()
 else:
     resultados = df.copy()
@@ -223,12 +237,12 @@ if resultados.empty:
     st.warning("No se encontró ningún producto")
 else:
     for _, fila in resultados.iterrows():
-        product_id = str(fila["PRODUCT_ID"])
         codigo = str(fila["CODIGO"])
         descripcion = str(fila["DESCRIPCION"])
         formato = str(fila["FORMATO"])
+        product_id = str(fila["PRODUCT_ID"])
 
-        precio_actual = float(fila[col_precio])
+        precio_actual = float(fila[columna_precio])
 
         key_cajas = f"cajas_{product_id}"
         key_add = f"add_{product_id}_{tarifa}"
