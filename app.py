@@ -18,23 +18,22 @@ def buscar_excel():
     return archivos_excel[0]
 
 
-# 💰 Limpiar precios correctamente (coma española)
+# 💰 Limpiar precios correctamente
 def limpiar_precio(valor):
     if pd.isna(valor):
         return None
 
-    # Si ya es número
     if isinstance(valor, (int, float)):
         return float(valor)
 
     texto = str(valor).strip()
     texto = texto.replace("€", "").replace(" ", "")
 
-    # Caso: 10,8 → 10.8
+    # Caso español: 10,8 → 10.8
     if "," in texto and "." not in texto:
         texto = texto.replace(",", ".")
 
-    # Caso: 1.234,56 → 1234.56
+    # Caso miles: 1.234,56 → 1234.56
     elif "," in texto and "." in texto:
         texto = texto.replace(".", "")
         texto = texto.replace(",", ".")
@@ -90,18 +89,51 @@ else:
             if resultados.empty:
                 st.warning("No se encontró ningún producto")
             else:
-                st.dataframe(
-                    resultados[
-                        [
-                            "CODIGO",
-                            "DESCRIPCION",
-                            "FORMATO",
-                            "PRECIO",
-                            "CLIENTE FINAL",
-                            "ALTA DISTRIBUCION",
-                            "HOSTELERIA",
-                        ]
-                    ],
-                    use_container_width=True,
-                    hide_index=True
+                tab_coste, tab_cliente, tab_distribucion, tab_hosteleria, tab_todo = st.tabs(
+                    ["Coste", "Cliente final", "Alta distribución", "Hostelería", "Todo"]
                 )
+
+                with tab_coste:
+                    st.dataframe(
+                        resultados[["CODIGO", "DESCRIPCION", "FORMATO", "PRECIO"]],
+                        use_container_width=True,
+                        hide_index=True
+                    )
+
+                with tab_cliente:
+                    st.dataframe(
+                        resultados[["CODIGO", "DESCRIPCION", "FORMATO", "CLIENTE FINAL"]],
+                        use_container_width=True,
+                        hide_index=True
+                    )
+
+                with tab_distribucion:
+                    st.dataframe(
+                        resultados[["CODIGO", "DESCRIPCION", "FORMATO", "ALTA DISTRIBUCION"]],
+                        use_container_width=True,
+                        hide_index=True
+                    )
+
+                with tab_hosteleria:
+                    st.dataframe(
+                        resultados[["CODIGO", "DESCRIPCION", "FORMATO", "HOSTELERIA"]],
+                        use_container_width=True,
+                        hide_index=True
+                    )
+
+                with tab_todo:
+                    st.dataframe(
+                        resultados[
+                            [
+                                "CODIGO",
+                                "DESCRIPCION",
+                                "FORMATO",
+                                "PRECIO",
+                                "CLIENTE FINAL",
+                                "ALTA DISTRIBUCION",
+                                "HOSTELERIA",
+                            ]
+                        ],
+                        use_container_width=True,
+                        hide_index=True
+                    )
