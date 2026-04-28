@@ -13,18 +13,43 @@ st.markdown("#### 🐟 Precios Pescados Pardo")
 
 st.markdown("""
 <style>
-.block-container {padding-top: 0.6rem; padding-bottom: 0.6rem;}
-div[data-testid="stVerticalBlock"] {gap: 0.25rem;}
-hr {margin: 0.3rem 0;}
-.stButton button {padding: 0.25rem 0.5rem; font-size: 0.85rem;}
-.producto {font-size: 0.88rem; line-height: 1.15;}
+.block-container {
+    padding-top: 0.6rem;
+    padding-bottom: 0.6rem;
+}
+
+div[data-testid="stVerticalBlock"] {
+    gap: 0.35rem;
+}
+
+hr {
+    margin: 0.55rem 0;
+}
+
+.stButton button {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.85rem;
+}
+
+.producto {
+    font-size: 0.90rem;
+    line-height: 1.25;
+    margin-bottom: 0.35rem;
+    display: block;
+    clear: both;
+}
+
+.producto b {
+    font-size: 0.92rem;
+}
+
+.producto-precio {
+    font-size: 0.88rem;
+    margin-top: 0.15rem;
+}
 </style>
 """, unsafe_allow_html=True)
 
-
-# =========================
-# CONFIGURACIÓN TARIFAS
-# =========================
 
 TARIFAS = {
     "1": "PRECIO",
@@ -33,10 +58,6 @@ TARIFAS = {
     "4": "HOSTELERIA",
 }
 
-
-# =========================
-# FUNCIONES
-# =========================
 
 def buscar_excel_tarifa():
     archivos = list(Path(".").glob("*.xlsx")) + list(Path(".").glob("*.xls"))
@@ -145,10 +166,6 @@ def cargar_tarifa():
     return df
 
 
-# =========================
-# ESTADO
-# =========================
-
 if "logueado" not in st.session_state:
     st.session_state.logueado = False
 
@@ -164,10 +181,6 @@ if "n_cliente" not in st.session_state:
 if "tarifa_cliente" not in st.session_state:
     st.session_state.tarifa_cliente = ""
 
-
-# =========================
-# LOGIN
-# =========================
 
 if not st.session_state.logueado:
     st.markdown("### Acceso cliente")
@@ -199,10 +212,6 @@ if not st.session_state.logueado:
     st.stop()
 
 
-# =========================
-# APP
-# =========================
-
 df = cargar_tarifa()
 
 st.success(f"Cliente: {st.session_state.cliente}")
@@ -215,10 +224,6 @@ if st.button("Cerrar sesión"):
     st.session_state.tarifa_cliente = ""
     st.rerun()
 
-
-# =========================
-# PEDIDO
-# =========================
 
 if st.session_state.pedido:
     total = sum(item["cajas"] for item in st.session_state.pedido)
@@ -244,10 +249,6 @@ else:
     st.info("Pedido vacío")
 
 
-# =========================
-# TARIFA
-# =========================
-
 tarifa_cliente = st.session_state.tarifa_cliente
 
 if tarifa_cliente == "TODAS":
@@ -268,62 +269,64 @@ if tarifa_visible not in TARIFAS:
 col_precio = TARIFAS[tarifa_visible]
 
 
-# =========================
-# BUSCADOR
-# =========================
-
 busqueda = st.text_input("Buscar", placeholder="Ej: anilla, atún, calamar...")
 
 if busqueda:
     resultados = df[
         df["DESCRIPCION"].astype(str).str.contains(busqueda, case=False, na=False)
     ].reset_index(drop=True)
+else:
+    resultados = df.head(30).reset_index(drop=True)
 
-    if resultados.empty:
-        st.warning("No se encontró ningún producto")
-    else:
-        for i, fila in resultados.iterrows():
-            codigo = str(fila["CODIGO"])
-            descripcion = str(fila["DESCRIPCION"])
-            formato = str(fila["FORMATO"])
-            precio = float(fila[col_precio])
+if resultados.empty:
+    st.warning("No se encontró ningún producto")
+else:
+    if not busqueda:
+        st.caption("Mostrando primeros 30 productos. Usa el buscador para filtrar.")
 
-            key = f"cajas_{i}_{codigo}_{tarifa_visible}_{busqueda}"
+    for i, fila in resultados.iterrows():
+        codigo = str(fila["CODIGO"])
+        descripcion = str(fila["DESCRIPCION"])
+        formato = str(fila["FORMATO"])
+        precio = float(fila[col_precio])
 
-            if key not in st.session_state:
-                st.session_state[key] = 1
+        key = f"cajas_{i}_{codigo}_{tarifa_visible}_{busqueda}"
 
-            st.markdown(
-                f"""
-                <div class="producto">
-                    <b>{descripcion}</b> · {euros(precio)} € · {formato}
-                </div>
-                """,
-                unsafe_allow_html=True
+        if key not in st.session_state:
+            st.session_state[key] = 1
+
+        st.markdown(
+            f"""
+            <div class="producto">
+                <b>{descripcion}</b>
+                <div class="producto-precio">{euros(precio)} € · {formato}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        col1, col2 = st.columns([1, 1])
+
+        with col1:
+            cajas = st.number_input(
+                "Cajas",
+                min_value=1,
+                value=st.session_state[key],
+                step=1,
+                key=key,
+                label_visibility="collapsed"
             )
 
-            col1, col2 = st.columns([1, 1])
+        with col2:
+            if st.button("Añadir", key=f"add_{i}_{codigo}_{tarifa_visible}_{busqueda}"):
+                st.session_state.pedido.append({
+                    "cajas": int(cajas),
+                    "codigo": codigo,
+                    "descripcion": descripcion,
+                    "precio": precio,
+                    "formato": formato,
+                    "tarifa": tarifa_visible,
+                })
+                st.rerun()
 
-            with col1:
-                cajas = st.number_input(
-                    "Cajas",
-                    min_value=1,
-                    value=st.session_state[key],
-                    step=1,
-                    key=key,
-                    label_visibility="collapsed"
-                )
-
-            with col2:
-                if st.button("Añadir", key=f"add_{i}_{codigo}_{tarifa_visible}_{busqueda}"):
-                    st.session_state.pedido.append({
-                        "cajas": int(cajas),
-                        "codigo": codigo,
-                        "descripcion": descripcion,
-                        "precio": precio,
-                        "formato": formato,
-                        "tarifa": tarifa_visible,
-                    })
-                    st.rerun()
-
-            st.markdown("---")
+        st.markdown("---")
