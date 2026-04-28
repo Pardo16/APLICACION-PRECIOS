@@ -3,53 +3,36 @@ import pandas as pd
 from pathlib import Path
 from urllib.parse import quote
 
-st.set_page_config(
-    page_title="Precios Pescados Pardo",
-    page_icon="🐟",
-    layout="centered"
-)
+st.set_page_config(page_title="Precios Pescados Pardo", page_icon="🐟", layout="centered")
 
 st.markdown("#### 🐟 Precios Pescados Pardo")
 
 st.markdown("""
 <style>
-.block-container {
-    padding-top: 0.6rem;
-    padding-bottom: 0.6rem;
-}
+.block-container {padding-top: 0.6rem; padding-bottom: 0.6rem;}
+div[data-testid="stVerticalBlock"] {gap: 0.35rem;}
+hr {margin: 0.5rem 0;}
 
-div[data-testid="stVerticalBlock"] {
-    gap: 0.35rem;
-}
-
-hr {
-    margin: 0.55rem 0;
+.producto {
+    font-size: 0.88rem;
+    line-height: 1.2;
+    margin-bottom: 0.3rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .stButton button {
     padding: 0.25rem 0.5rem;
     font-size: 0.85rem;
 }
-
-.producto {
-    font-size: 0.90rem;
-    line-height: 1.25;
-    margin-bottom: 0.35rem;
-    display: block;
-    clear: both;
-}
-
-.producto b {
-    font-size: 0.92rem;
-}
-
-.producto-precio {
-    font-size: 0.88rem;
-    margin-top: 0.15rem;
-}
 </style>
 """, unsafe_allow_html=True)
 
+
+# =========================
+# TARIFAS
+# =========================
 
 TARIFAS = {
     "1": "PRECIO",
@@ -58,6 +41,10 @@ TARIFAS = {
     "4": "HOSTELERIA",
 }
 
+
+# =========================
+# FUNCIONES
+# =========================
 
 def buscar_excel_tarifa():
     archivos = list(Path(".").glob("*.xlsx")) + list(Path(".").glob("*.xls"))
@@ -114,19 +101,11 @@ def cargar_clientes():
     archivo = buscar_excel_clientes()
 
     if archivo is None:
-        st.error("No encuentro el archivo clientes.xlsx en GitHub.")
+        st.error("No hay clientes.xlsx")
         st.stop()
 
     clientes = pd.read_excel(archivo)
-    clientes.columns = clientes.columns.astype(str).str.strip().str.upper()
-
-    columnas = ["N_CLIENTE", "CLIENTE", "CONTRASEÑA", "TARIFA"]
-    faltan = [c for c in columnas if c not in clientes.columns]
-
-    if faltan:
-        st.error(f"Faltan columnas en clientes.xlsx: {faltan}")
-        st.write("Columnas encontradas:", list(clientes.columns))
-        st.stop()
+    clientes.columns = clientes.columns.str.strip().str.upper()
 
     clientes["N_CLIENTE"] = clientes["N_CLIENTE"].astype(str).str.strip()
     clientes["CONTRASEÑA"] = clientes["CONTRASEÑA"].astype(str).str.strip()
@@ -139,19 +118,11 @@ def cargar_tarifa():
     archivo = buscar_excel_tarifa()
 
     if archivo is None:
-        st.error("No encuentro ningún Excel de tarifa en GitHub.")
+        st.error("No hay Excel de tarifas")
         st.stop()
 
     df = pd.read_excel(archivo)
-    df.columns = df.columns.astype(str).str.strip().str.upper()
-
-    columnas = ["CODIGO", "DESCRIPCION", "FORMATO", "PRECIO"]
-    faltan = [c for c in columnas if c not in df.columns]
-
-    if faltan:
-        st.error(f"Faltan columnas en el Excel de tarifa: {faltan}")
-        st.write("Columnas encontradas:", list(df.columns))
-        st.stop()
+    df.columns = df.columns.str.strip().str.upper()
 
     df["PRECIO"] = df["PRECIO"].apply(limpiar_precio)
     df = df.dropna(subset=["PRECIO"])
@@ -160,11 +131,12 @@ def cargar_tarifa():
     df["ALTA DISTRIBUCION"] = df["PRECIO"] / 0.90
     df["HOSTELERIA"] = df["PRECIO"] / 0.80
 
-    for col in ["PRECIO", "CLIENTE FINAL", "ALTA DISTRIBUCION", "HOSTELERIA"]:
-        df[col] = df[col].round(2)
-
     return df
 
+
+# =========================
+# ESTADO
+# =========================
 
 if "logueado" not in st.session_state:
     st.session_state.logueado = False
@@ -172,15 +144,10 @@ if "logueado" not in st.session_state:
 if "pedido" not in st.session_state:
     st.session_state.pedido = []
 
-if "cliente" not in st.session_state:
-    st.session_state.cliente = ""
 
-if "n_cliente" not in st.session_state:
-    st.session_state.n_cliente = ""
-
-if "tarifa_cliente" not in st.session_state:
-    st.session_state.tarifa_cliente = ""
-
+# =========================
+# LOGIN
+# =========================
 
 if not st.session_state.logueado:
     st.markdown("### Acceso cliente")
@@ -191,26 +158,26 @@ if not st.session_state.logueado:
     if st.button("Entrar"):
         clientes = cargar_clientes()
 
-        usuario = clientes[
-            (clientes["N_CLIENTE"] == str(n_cliente).strip()) &
-            (clientes["CONTRASEÑA"] == str(password).strip())
+        user = clientes[
+            (clientes["N_CLIENTE"] == n_cliente) &
+            (clientes["CONTRASEÑA"] == password)
         ]
 
-        if usuario.empty:
-            st.error("Nº cliente o contraseña incorrectos.")
+        if user.empty:
+            st.error("Datos incorrectos")
         else:
-            usuario = usuario.iloc[0]
-
+            user = user.iloc[0]
             st.session_state.logueado = True
-            st.session_state.n_cliente = str(usuario["N_CLIENTE"])
-            st.session_state.cliente = str(usuario["CLIENTE"])
-            st.session_state.tarifa_cliente = str(usuario["TARIFA"]).upper()
-            st.session_state.pedido = []
-
+            st.session_state.cliente = user["CLIENTE"]
+            st.session_state.tarifa = user["TARIFA"]
             st.rerun()
 
     st.stop()
 
+
+# =========================
+# APP
+# =========================
 
 df = cargar_tarifa()
 
@@ -219,114 +186,85 @@ st.success(f"Cliente: {st.session_state.cliente}")
 if st.button("Cerrar sesión"):
     st.session_state.logueado = False
     st.session_state.pedido = []
-    st.session_state.cliente = ""
-    st.session_state.n_cliente = ""
-    st.session_state.tarifa_cliente = ""
     st.rerun()
 
 
+# =========================
+# PEDIDO
+# =========================
+
 if st.session_state.pedido:
-    total = sum(item["cajas"] for item in st.session_state.pedido)
+    total = sum(i["cajas"] for i in st.session_state.pedido)
+
     st.success(f"{len(st.session_state.pedido)} productos | {total} cajas")
 
-    texto = crear_texto_pedido(
-        st.session_state.cliente,
-        st.session_state.pedido
-    )
-
+    texto = crear_texto_pedido(st.session_state.cliente, st.session_state.pedido)
     url = "https://wa.me/?text=" + quote(texto)
 
     col1, col2 = st.columns(2)
+    col1.link_button("Finalizar pedido", url)
 
-    with col1:
-        st.link_button("Finalizar pedido", url)
-
-    with col2:
-        if st.button("Vaciar"):
-            st.session_state.pedido = []
-            st.rerun()
+    if col2.button("Vaciar"):
+        st.session_state.pedido = []
+        st.rerun()
 else:
     st.info("Pedido vacío")
 
 
-tarifa_cliente = st.session_state.tarifa_cliente
+# =========================
+# TARIFA
+# =========================
 
-if tarifa_cliente == "TODAS":
-    tarifa_visible = st.radio(
-        "Tarifa",
-        ["1", "2", "3", "4"],
-        horizontal=True,
-        format_func=lambda x: f"Tarifa {x}"
-    )
+if st.session_state.tarifa == "TODAS":
+    tarifa = st.radio("Tarifa", ["1","2","3","4"], horizontal=True)
 else:
-    tarifa_visible = tarifa_cliente
-    st.info(f"Tarifa {tarifa_visible}")
+    tarifa = st.session_state.tarifa
+    st.info(f"Tarifa {tarifa}")
 
-if tarifa_visible not in TARIFAS:
-    st.error("La tarifa asignada no es válida. Usa 1, 2, 3, 4 o TODAS en clientes.xlsx.")
-    st.stop()
-
-col_precio = TARIFAS[tarifa_visible]
+col_precio = TARIFAS[tarifa]
 
 
-busqueda = st.text_input("Buscar", placeholder="Ej: anilla, atún, calamar...")
+# =========================
+# BUSCADOR + LISTA
+# =========================
+
+busqueda = st.text_input("Buscar")
 
 if busqueda:
-    resultados = df[
-        df["DESCRIPCION"].astype(str).str.contains(busqueda, case=False, na=False)
-    ].reset_index(drop=True)
+    resultados = df[df["DESCRIPCION"].str.contains(busqueda, case=False, na=False)]
 else:
-    resultados = df.head(30).reset_index(drop=True)
+    resultados = df.head(40)
 
-if resultados.empty:
-    st.warning("No se encontró ningún producto")
-else:
-    if not busqueda:
-        st.caption("Mostrando primeros 30 productos. Usa el buscador para filtrar.")
+for i, fila in resultados.iterrows():
 
-    for i, fila in resultados.iterrows():
-        codigo = str(fila["CODIGO"])
-        descripcion = str(fila["DESCRIPCION"])
-        formato = str(fila["FORMATO"])
-        precio = float(fila[col_precio])
+    descripcion = fila["DESCRIPCION"]
+    formato = fila["FORMATO"]
+    precio = fila[col_precio]
 
-        key = f"cajas_{i}_{codigo}_{tarifa_visible}_{busqueda}"
+    st.markdown(
+        f"<div class='producto'><b>{descripcion}</b> · {euros(precio)} € · {formato}</div>",
+        unsafe_allow_html=True
+    )
 
-        if key not in st.session_state:
-            st.session_state[key] = 1
+    col1, col2 = st.columns([1,1])
 
-        st.markdown(
-            f"""
-            <div class="producto">
-                <b>{descripcion}</b>
-                <div class="producto-precio">{euros(precio)} € · {formato}</div>
-            </div>
-            """,
-            unsafe_allow_html=True
+    with col1:
+        cajas = st.number_input(
+            "cajas",
+            min_value=1,
+            value=1,
+            key=f"cajas_{i}",
+            label_visibility="collapsed"
         )
 
-        col1, col2 = st.columns([1, 1])
+    with col2:
+        if st.button("Añadir", key=f"add_{i}"):
+            st.session_state.pedido.append({
+                "cajas": cajas,
+                "descripcion": descripcion,
+                "precio": precio,
+                "formato": formato
+            })
+            st.rerun()
 
-        with col1:
-            cajas = st.number_input(
-                "Cajas",
-                min_value=1,
-                value=st.session_state[key],
-                step=1,
-                key=key,
-                label_visibility="collapsed"
-            )
-
-        with col2:
-            if st.button("Añadir", key=f"add_{i}_{codigo}_{tarifa_visible}_{busqueda}"):
-                st.session_state.pedido.append({
-                    "cajas": int(cajas),
-                    "codigo": codigo,
-                    "descripcion": descripcion,
-                    "precio": precio,
-                    "formato": formato,
-                    "tarifa": tarifa_visible,
-                })
-                st.rerun()
-
-        st.markdown("---")
+    st.markdown("---")
