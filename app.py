@@ -61,6 +61,21 @@ st.markdown("""
 hr {
     margin: 0.35rem 0;
 }
+
+/* 🔥 INPUT VERDE */
+div[data-baseweb="input"] input {
+    border: 2px solid #28a745 !important;
+    box-shadow: none !important;
+}
+
+div[data-baseweb="input"] input:focus {
+    border: 2px solid #28a745 !important;
+    box-shadow: 0 0 0 1px #28a745 !important;
+}
+
+div[data-baseweb="input"] {
+    border-radius: 8px;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -168,7 +183,7 @@ for col in ["PRECIO", "CLIENTE FINAL", "ALTA DISTRIBUCION", "HOSTELERIA"]:
     df[col] = df[col].round(2)
 
 
-# Acciones desde botones HTML
+# Acciones botones HTML
 params = st.query_params
 
 accion = params.get("accion", None)
