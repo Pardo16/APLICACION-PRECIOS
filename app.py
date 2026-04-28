@@ -157,22 +157,23 @@ if busqueda:
 
         col1, col2 = st.columns([1, 1])
 
+        # 🔥 CANTIDAD EN UNA SOLA LÍNEA
         with col1:
-            sub1, sub2, sub3 = st.columns([1, 1, 1])
+            c1, c2, c3 = st.columns([1,1,1])
 
-            with sub1:
+            with c1:
                 if st.button("➖", key=f"menos_{i}"):
                     if st.session_state[key] > 1:
                         st.session_state[key] -= 1
                     st.rerun()
 
-            with sub2:
+            with c2:
                 st.markdown(
-                    f"<div style='text-align:center; font-weight:700;'>{st.session_state[key]}</div>",
+                    f"<div style='text-align:center;font-weight:700'>{st.session_state[key]}</div>",
                     unsafe_allow_html=True
                 )
 
-            with sub3:
+            with c3:
                 if st.button("➕", key=f"mas_{i}"):
                     st.session_state[key] += 1
                     st.rerun()
