@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import math
 from pathlib import Path
 from urllib.parse import quote
 
@@ -90,6 +91,20 @@ def limpiar_precio(valor):
         return None
 
 
+def redondeo_comercial(valor):
+    if pd.isna(valor):
+        return None
+
+    valor = float(valor)
+    centimos = math.ceil(valor * 100)
+
+    resto = centimos % 5
+    if resto != 0:
+        centimos += 5 - resto
+
+    return centimos / 100
+
+
 def euros(valor):
     return f"{float(valor):.2f}".replace(".", ",")
 
@@ -156,9 +171,9 @@ def cargar_tarifa():
     df["PRECIO"] = df["PRECIO"].apply(limpiar_precio)
     df = df.dropna(subset=["PRECIO"])
 
-    df["CLIENTE FINAL"] = df["PRECIO"] / 0.55
-    df["ALTA DISTRIBUCION"] = df["PRECIO"] / 0.90
-    df["HOSTELERIA"] = df["PRECIO"] / 0.80
+    df["CLIENTE FINAL"] = (df["PRECIO"] / 0.55).apply(redondeo_comercial)
+    df["ALTA DISTRIBUCION"] = (df["PRECIO"] / 0.90).apply(redondeo_comercial)
+    df["HOSTELERIA"] = (df["PRECIO"] / 0.80).apply(redondeo_comercial)
 
     for col in ["PRECIO", "CLIENTE FINAL", "ALTA DISTRIBUCION", "HOSTELERIA"]:
         df[col] = df[col].round(2)
