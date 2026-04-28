@@ -10,11 +10,9 @@ st.markdown("#### 🐟 Precios Pescados Pardo")
 st.markdown("""
 <style>
 .block-container {padding-top: 1rem; padding-bottom: 1rem;}
-div[data-testid="stVerticalBlock"] {gap: 0.35rem;}
-p {margin-bottom: 0.15rem;}
-hr {margin: 0.35rem 0;}
-.stButton button {padding: 0.25rem 0.5rem; font-size: 0.85rem;}
-input {font-size: 0.9rem !important;}
+div[data-testid="stVerticalBlock"] {gap: 0.25rem;}
+hr {margin: 0.25rem 0;}
+.stButton button {padding: 0.2rem 0.4rem; font-size: 0.8rem;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -70,37 +68,26 @@ if "pedido" not in st.session_state:
 if "nombre_cliente" not in st.session_state:
     st.session_state.nombre_cliente = ""
 
+if "mensaje" not in st.session_state:
+    st.session_state.mensaje = ""
 
-nombre_cliente = st.text_input(
-    "Cliente",
-    value=st.session_state.nombre_cliente,
-    placeholder="Nombre del cliente"
-)
 
+# Cliente
+nombre_cliente = st.text_input("Cliente", value=st.session_state.nombre_cliente)
 st.session_state.nombre_cliente = nombre_cliente.strip()
 
 if not st.session_state.nombre_cliente:
-    st.warning("Escribe el nombre del cliente para empezar.")
+    st.warning("Escribe el nombre del cliente")
     st.stop()
 
 
 archivo_excel = buscar_excel()
-
 if archivo_excel is None:
-    st.error("No hay ningún Excel en el repositorio.")
+    st.error("No hay Excel en el repo")
     st.stop()
-
 
 df = pd.read_excel(archivo_excel)
 df.columns = df.columns.astype(str).str.strip().str.upper()
-
-columnas_necesarias = ["CODIGO", "DESCRIPCION", "FORMATO", "PRECIO"]
-faltan = [col for col in columnas_necesarias if col not in df.columns]
-
-if faltan:
-    st.error(f"Faltan columnas: {faltan}")
-    st.write("Columnas encontradas:", list(df.columns))
-    st.stop()
 
 df["PRECIO"] = df["PRECIO"].apply(limpiar_precio)
 df = df.dropna(subset=["PRECIO"])
@@ -113,32 +100,29 @@ for col in ["PRECIO", "CLIENTE FINAL", "ALTA DISTRIBUCION", "HOSTELERIA"]:
     df[col] = df[col].round(2)
 
 
-# Pedido arriba
+# Pedido
 if st.session_state.pedido:
-    total_cajas = sum(item["cajas"] for item in st.session_state.pedido)
-    st.success(
-        f"Pedido | Cliente: {st.session_state.nombre_cliente} | "
-        f"Productos: {len(st.session_state.pedido)} | Cajas: {total_cajas}"
-    )
+    total = sum(i["cajas"] for i in st.session_state.pedido)
 
-    texto_pedido = crear_texto_pedido(st.session_state.nombre_cliente, st.session_state.pedido)
-    whatsapp_url = "https://wa.me/?text=" + quote(texto_pedido)
+    st.success(f"{len(st.session_state.pedido)} productos | {total} cajas")
 
-    col_a, col_b, col_c = st.columns([1, 1, 1])
+    texto = crear_texto_pedido(st.session_state.nombre_cliente, st.session_state.pedido)
+    url = "https://wa.me/?text=" + quote(texto)
 
-    with col_a:
-        st.link_button("✅ Finalizar pedido", whatsapp_url)
+    col1, col2 = st.columns([1,1])
 
-    with col_b:
-        with st.expander("Ver pedido"):
-            st.text(texto_pedido)
+    with col1:
+        st.link_button("Finalizar pedido", url)
 
-    with col_c:
-        if st.button("Vaciar pedido"):
+    with col2:
+        if st.button("Vaciar"):
             st.session_state.pedido = []
             st.rerun()
-else:
-    st.info(f"Pedido vacío | Cliente: {st.session_state.nombre_cliente}")
+
+# Mensaje de feedback
+if st.session_state.mensaje:
+    st.success(st.session_state.mensaje)
+    st.session_state.mensaje = ""
 
 
 tarifa = st.radio(
@@ -147,60 +131,55 @@ tarifa = st.radio(
     horizontal=True
 )
 
-columna_precio = {
+col_precio = {
     "Coste": "PRECIO",
     "Cliente final": "CLIENTE FINAL",
     "Alta distribución": "ALTA DISTRIBUCION",
     "Hostelería": "HOSTELERIA",
 }[tarifa]
 
-busqueda = st.text_input("Buscar producto", placeholder="Ej: anilla, atún, calamar...")
+busqueda = st.text_input("Buscar")
 
 if busqueda:
     resultados = df[
         df["DESCRIPCION"].astype(str).str.contains(busqueda, case=False, na=False)
     ].reset_index(drop=True)
 
-    if resultados.empty:
-        st.warning("No se encontró ningún producto")
-    else:
-        for i, fila in resultados.iterrows():
-            codigo = str(fila["CODIGO"])
-            descripcion = str(fila["DESCRIPCION"])
-            formato = str(fila["FORMATO"])
-            precio = float(fila[columna_precio])
+    for i, fila in resultados.iterrows():
+        descripcion = fila["DESCRIPCION"]
+        formato = fila["FORMATO"]
+        precio = fila[col_precio]
 
-            col_info, col_cajas, col_add = st.columns([6, 1, 1])
+        col1, col2 = st.columns([7, 2])
 
-            with col_info:
-                st.markdown(
-                    f"<div style='font-size:0.85rem; line-height:1.1;'>"
-                    f"<b>{descripcion}</b><br>"
-                    f"{euros(precio)} € · {formato}"
-                    f"</div>",
-                    unsafe_allow_html=True
-                )
+        with col1:
+            st.markdown(
+                f"<b>{descripcion}</b> · {euros(precio)} € · {formato}",
+                unsafe_allow_html=True
+            )
 
-            with col_cajas:
+        with col2:
+            sub1, sub2 = st.columns([1,1])
+
+            with sub1:
                 cajas = st.number_input(
-                    "Cajas",
+                    "",
                     min_value=1,
                     value=1,
                     step=1,
-                    key=f"cajas_{i}_{codigo}_{tarifa}",
+                    key=f"c_{i}",
                     label_visibility="collapsed"
                 )
 
-            with col_add:
-                if st.button("➕", key=f"add_{i}_{codigo}_{tarifa}"):
+            with sub2:
+                if st.button("➕", key=f"a_{i}"):
                     st.session_state.pedido.append({
                         "cajas": int(cajas),
-                        "codigo": codigo,
                         "descripcion": descripcion,
                         "precio": precio,
-                        "formato": formato,
-                        "tarifa": tarifa,
+                        "formato": formato
                     })
+                    st.session_state.mensaje = f"✔ {descripcion} añadido"
                     st.rerun()
 
-            st.markdown("---")
+        st.markdown("---")
