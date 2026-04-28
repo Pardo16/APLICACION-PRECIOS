@@ -10,37 +10,51 @@ st.set_page_config(
 
 st.title("🔎 Buscador de precios PRO")
 
-def buscar_excel_en_github():
+# 🔍 Buscar automáticamente Excel en el repo
+def buscar_excel():
     archivos_excel = list(Path(".").glob("*.xlsx")) + list(Path(".").glob("*.xls"))
-
     if not archivos_excel:
         return None
-
     return archivos_excel[0]
 
+
+# 💰 Limpiar precios correctamente (coma española)
 def limpiar_precio(valor):
     if pd.isna(valor):
         return None
 
+    # Si ya es número
+    if isinstance(valor, (int, float)):
+        return float(valor)
+
     texto = str(valor).strip()
-    texto = texto.replace("€", "")
-    texto = texto.replace(".", "")
-    texto = texto.replace(",", ".")
+    texto = texto.replace("€", "").replace(" ", "")
+
+    # Caso: 10,8 → 10.8
+    if "," in texto and "." not in texto:
+        texto = texto.replace(",", ".")
+
+    # Caso: 1.234,56 → 1234.56
+    elif "," in texto and "." in texto:
+        texto = texto.replace(".", "")
+        texto = texto.replace(",", ".")
 
     try:
         return float(texto)
     except:
         return None
 
-archivo_excel = buscar_excel_en_github()
+
+archivo_excel = buscar_excel()
 
 if archivo_excel is None:
-    st.error("No hay ningún Excel subido en GitHub.")
+    st.error("No hay ningún archivo Excel en el repositorio.")
 else:
-    st.info(f"Usando Excel por defecto: {archivo_excel.name}")
+    st.info(f"Usando archivo: {archivo_excel.name}")
 
     df = pd.read_excel(archivo_excel)
 
+    # 🔧 Limpiar nombres de columnas
     df.columns = df.columns.astype(str).str.strip().str.upper()
 
     columnas_necesarias = ["CODIGO", "DESCRIPCION", "FORMATO", "PRECIO"]
@@ -50,18 +64,22 @@ else:
         st.error(f"Faltan columnas: {faltan}")
         st.write("Columnas encontradas:", list(df.columns))
     else:
+        # Limpiar precios
         df["PRECIO"] = df["PRECIO"].apply(limpiar_precio)
         df = df.dropna(subset=["PRECIO"])
 
+        # 💸 Cálculo de precios
         df["CLIENTE FINAL"] = df["PRECIO"] / 0.55
         df["ALTA DISTRIBUCION"] = df["PRECIO"] / 0.90
         df["HOSTELERIA"] = df["PRECIO"] / 0.80
 
+        # Redondeo
         for col in ["PRECIO", "CLIENTE FINAL", "ALTA DISTRIBUCION", "HOSTELERIA"]:
             df[col] = df[col].round(2)
 
-        st.success("Excel cargado correctamente")
+        st.success("Tarifa cargada correctamente")
 
+        # 🔎 Buscador
         busqueda = st.text_input("Buscar producto")
 
         if busqueda:
@@ -70,7 +88,7 @@ else:
             ]
 
             if resultados.empty:
-                st.warning("No se encontró nada")
+                st.warning("No se encontró ningún producto")
             else:
                 st.dataframe(
                     resultados[
