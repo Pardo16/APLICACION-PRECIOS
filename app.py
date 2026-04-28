@@ -10,15 +10,10 @@ st.set_page_config(
 
 st.title("🔎 Buscador de precios PRO")
 
-# 🔍 Buscar automáticamente Excel en el repo
 def buscar_excel():
     archivos_excel = list(Path(".").glob("*.xlsx")) + list(Path(".").glob("*.xls"))
-    if not archivos_excel:
-        return None
-    return archivos_excel[0]
+    return archivos_excel[0] if archivos_excel else None
 
-
-# 💰 Limpiar precios correctamente
 def limpiar_precio(valor):
     if pd.isna(valor):
         return None
@@ -29,11 +24,8 @@ def limpiar_precio(valor):
     texto = str(valor).strip()
     texto = texto.replace("€", "").replace(" ", "")
 
-    # Caso español: 10,8 → 10.8
     if "," in texto and "." not in texto:
         texto = texto.replace(",", ".")
-
-    # Caso miles: 1.234,56 → 1234.56
     elif "," in texto and "." in texto:
         texto = texto.replace(".", "")
         texto = texto.replace(",", ".")
@@ -43,6 +35,8 @@ def limpiar_precio(valor):
     except:
         return None
 
+def euros(valor):
+    return f"{valor:.2f} €".replace(".", ",")
 
 archivo_excel = buscar_excel()
 
@@ -52,8 +46,6 @@ else:
     st.info(f"Usando archivo: {archivo_excel.name}")
 
     df = pd.read_excel(archivo_excel)
-
-    # 🔧 Limpiar nombres de columnas
     df.columns = df.columns.astype(str).str.strip().str.upper()
 
     columnas_necesarias = ["CODIGO", "DESCRIPCION", "FORMATO", "PRECIO"]
@@ -63,22 +55,24 @@ else:
         st.error(f"Faltan columnas: {faltan}")
         st.write("Columnas encontradas:", list(df.columns))
     else:
-        # Limpiar precios
         df["PRECIO"] = df["PRECIO"].apply(limpiar_precio)
         df = df.dropna(subset=["PRECIO"])
 
-        # 💸 Cálculo de precios
         df["CLIENTE FINAL"] = df["PRECIO"] / 0.55
         df["ALTA DISTRIBUCION"] = df["PRECIO"] / 0.90
         df["HOSTELERIA"] = df["PRECIO"] / 0.80
 
-        # Redondeo
         for col in ["PRECIO", "CLIENTE FINAL", "ALTA DISTRIBUCION", "HOSTELERIA"]:
             df[col] = df[col].round(2)
 
         st.success("Tarifa cargada correctamente")
 
-        # 🔎 Buscador
+        tipo_precio = st.radio(
+            "Selecciona tarifa",
+            ["Coste", "Cliente final", "Alta distribución", "Hostelería", "Todo"],
+            horizontal=True
+        )
+
         busqueda = st.text_input("Buscar producto")
 
         if busqueda:
@@ -89,39 +83,41 @@ else:
             if resultados.empty:
                 st.warning("No se encontró ningún producto")
             else:
-                tab_coste, tab_cliente, tab_distribucion, tab_hosteleria, tab_todo = st.tabs(
-                    ["Coste", "Cliente final", "Alta distribución", "Hostelería", "Todo"]
-                )
+                columna_precio = {
+                    "Coste": "PRECIO",
+                    "Cliente final": "CLIENTE FINAL",
+                    "Alta distribución": "ALTA DISTRIBUCION",
+                    "Hostelería": "HOSTELERIA",
+                }
 
-                with tab_coste:
-                    st.dataframe(
-                        resultados[["CODIGO", "DESCRIPCION", "FORMATO", "PRECIO"]],
-                        use_container_width=True,
-                        hide_index=True
-                    )
+                if tipo_precio != "Todo":
+                    col = columna_precio[tipo_precio]
 
-                with tab_cliente:
-                    st.dataframe(
-                        resultados[["CODIGO", "DESCRIPCION", "FORMATO", "CLIENTE FINAL"]],
-                        use_container_width=True,
-                        hide_index=True
-                    )
+                    for _, fila in resultados.iterrows():
+                        st.markdown("---")
+                        st.subheader(str(fila["DESCRIPCION"]))
 
-                with tab_distribucion:
-                    st.dataframe(
-                        resultados[["CODIGO", "DESCRIPCION", "FORMATO", "ALTA DISTRIBUCION"]],
-                        use_container_width=True,
-                        hide_index=True
-                    )
+                        st.write(f"**Código:** {fila['CODIGO']}")
+                        st.write(f"**Formato:** {fila['FORMATO']}")
 
-                with tab_hosteleria:
-                    st.dataframe(
-                        resultados[["CODIGO", "DESCRIPCION", "FORMATO", "HOSTELERIA"]],
-                        use_container_width=True,
-                        hide_index=True
-                    )
+                        st.markdown(
+                            f"""
+                            <div style="
+                                font-size:42px;
+                                font-weight:800;
+                                padding:18px;
+                                border-radius:18px;
+                                background:#f1f1f1;
+                                text-align:center;
+                                margin-top:10px;
+                            ">
+                                {euros(fila[col])}
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
 
-                with tab_todo:
+                else:
                     st.dataframe(
                         resultados[
                             [
