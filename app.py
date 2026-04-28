@@ -39,6 +39,21 @@ def limpiar_precio(valor):
 def euros(valor):
     return f"{float(valor):.2f}".replace(".", ",")
 
+def crear_texto_pedido(pedido):
+    lineas = ["PEDIDO", ""]
+    total_cajas = 0
+
+    for item in pedido:
+        total_cajas += item["cajas"]
+        lineas.append(
+            f"- {item['cajas']} cajas | {item['descripcion']} | "
+            f"{euros(item['precio'])} € | {item['formato']}"
+        )
+
+    lineas.append("")
+    lineas.append(f"Total cajas: {total_cajas}")
+    return "\n".join(lineas)
+
 if "pedido" not in st.session_state:
     st.session_state.pedido = []
 
@@ -69,8 +84,35 @@ else:
         for col in ["PRECIO", "CLIENTE FINAL", "ALTA DISTRIBUCION", "HOSTELERIA"]:
             df[col] = df[col].round(2)
 
+        st.markdown("## 🧾 Pedido")
+
+        if not st.session_state.pedido:
+            st.info("Pedido vacío")
+        else:
+            total_cajas = sum(item["cajas"] for item in st.session_state.pedido)
+
+            st.success(f"Productos añadidos: {len(st.session_state.pedido)} | Total cajas: {total_cajas}")
+
+            with st.expander("Ver pedido"):
+                for item in st.session_state.pedido:
+                    st.write(
+                        f"{item['cajas']} cajas | {item['descripcion']} | "
+                        f"{euros(item['precio'])} € | {item['formato']}"
+                    )
+
+            texto_pedido = crear_texto_pedido(st.session_state.pedido)
+            whatsapp_url = "https://wa.me/?text=" + quote(texto_pedido)
+
+            st.link_button("✅ Finalizar pedido por WhatsApp", whatsapp_url)
+
+            if st.button("Vaciar pedido"):
+                st.session_state.pedido = []
+                st.rerun()
+
+        st.markdown("---")
+
         tarifa = st.radio(
-            "Selecciona tarifa",
+            "Tarifa",
             ["Coste", "Cliente final", "Alta distribución", "Hostelería"],
             horizontal=True
         )
@@ -92,7 +134,7 @@ else:
             if resultados.empty:
                 st.warning("No se encontró ningún producto")
             else:
-                st.subheader("Resultados")
+                st.markdown("### Resultados")
 
                 for i, fila in resultados.reset_index(drop=True).iterrows():
                     codigo = str(fila["CODIGO"])
@@ -100,13 +142,15 @@ else:
                     formato = str(fila["FORMATO"])
                     precio = float(fila[columna_precio])
 
-                    st.markdown("---")
-                    st.write(f"**{codigo} | {descripcion}**")
-                    st.write(f"Precio: **{euros(precio)} €** | Formato: {formato}")
+                    col_info, col_cajas, col_add = st.columns([5, 1.4, 1.6])
 
-                    col1, col2 = st.columns([1, 1])
+                    with col_info:
+                        st.markdown(
+                            f"**{descripcion}**  \n"
+                            f"{euros(precio)} € · {formato}"
+                        )
 
-                    with col1:
+                    with col_cajas:
                         cajas = st.number_input(
                             "Cajas",
                             min_value=1,
@@ -115,7 +159,8 @@ else:
                             key=f"cajas_{i}_{codigo}_{tarifa}"
                         )
 
-                    with col2:
+                    with col_add:
+                        st.write("")
                         if st.button("Añadir", key=f"add_{i}_{codigo}_{tarifa}"):
                             st.session_state.pedido.append({
                                 "cajas": int(cajas),
@@ -125,40 +170,6 @@ else:
                                 "formato": formato,
                                 "tarifa": tarifa,
                             })
-                            st.success("Añadido al pedido")
+                            st.rerun()
 
-        st.markdown("---")
-        st.header("🧾 Pedido para WhatsApp")
-
-        if not st.session_state.pedido:
-            st.info("Todavía no has añadido productos.")
-        else:
-            lineas = ["PEDIDO", ""]
-
-            total_cajas = 0
-
-            for item in st.session_state.pedido:
-                total_cajas += item["cajas"]
-                lineas.append(
-                    f"- {item['cajas']} cajas | {item['codigo']} | "
-                    f"{item['descripcion']} | {euros(item['precio'])} € | {item['formato']}"
-                )
-
-            lineas.append("")
-            lineas.append(f"Total cajas: {total_cajas}")
-
-            texto_pedido = "\n".join(lineas)
-
-            st.text_area(
-                "Copia este texto y mándalo por WhatsApp",
-                texto_pedido,
-                height=220
-            )
-
-            whatsapp_url = "https://wa.me/?text=" + quote(texto_pedido)
-
-            st.link_button("Enviar por WhatsApp", whatsapp_url)
-
-            if st.button("Vaciar pedido"):
-                st.session_state.pedido = []
-                st.rerun()
+                    st.markdown("---")
