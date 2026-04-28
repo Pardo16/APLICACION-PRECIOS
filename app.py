@@ -7,35 +7,77 @@ st.set_page_config(
     layout="centered"
 )
 
-st.title("🔎 Buscador de precios")
+st.title("🔎 Buscador de precios PRO")
 
-@st.cache_data
-def cargar_excel():
-    df = pd.read_excel("tarifa.xlsx")
-    df.columns = df.columns.str.strip()
-    return df
+st.write("Sube tu Excel de tarifa y busca productos por descripción.")
 
-try:
-    df = cargar_excel()
+archivo = st.file_uploader("Sube tu archivo Excel", type=["xlsx", "xls"])
 
-    st.success("Tarifa cargada correctamente")
+def limpiar_precio(valor):
+    if pd.isna(valor):
+        return None
 
-    nombre = st.text_input("Buscar producto")
+    texto = str(valor).strip()
+    texto = texto.replace("€", "")
+    texto = texto.replace(".", "")
+    texto = texto.replace(",", ".")
 
-    if nombre:
-        resultados = df[
-            df["Nombre"].astype(str).str.contains(nombre, case=False, na=False)
+    try:
+        return float(texto)
+    except:
+        return None
+
+if archivo is not None:
+    df = pd.read_excel(archivo)
+
+    # Limpiar nombres de columnas
+    df.columns = df.columns.astype(str).str.strip().str.upper()
+
+    columnas_necesarias = ["CODIGO", "DESCRIPCION", "FORMATO", "PRECIO"]
+
+    faltan = [col for col in columnas_necesarias if col not in df.columns]
+
+    if faltan:
+        st.error(f"Faltan estas columnas en el Excel: {faltan}")
+        st.write("Columnas encontradas:")
+        st.write(list(df.columns))
+    else:
+        df["PRECIO"] = df["PRECIO"].apply(limpiar_precio)
+
+        df = df.dropna(subset=["PRECIO"])
+
+        df["CLIENTE FINAL"] = df["PRECIO"] / 0.55
+        df["ALTA DISTRIBUCION"] = df["PRECIO"] / 0.90
+        df["HOSTELERIA"] = df["PRECIO"] / 0.80
+
+        columnas_resultado = [
+            "CODIGO",
+            "DESCRIPCION",
+            "FORMATO",
+            "PRECIO",
+            "CLIENTE FINAL",
+            "ALTA DISTRIBUCION",
+            "HOSTELERIA"
         ]
 
-        resultados = resultados.dropna(subset=["Precio"])
+        for col in ["PRECIO", "CLIENTE FINAL", "ALTA DISTRIBUCION", "HOSTELERIA"]:
+            df[col] = df[col].round(2)
 
-        if resultados.empty:
-            st.warning("No se encontró ningún resultado")
-        else:
-            st.dataframe(
-                resultados[["Nombre", "FORMATO", "Precio"]],
-                use_container_width=True
-            )
+        st.success("Excel cargado correctamente")
 
-except FileNotFoundError:
-    st.error("No encuentro el archivo tarifa.xlsx en la carpeta de la app")
+        busqueda = st.text_input("Buscar producto por descripción")
+
+        if busqueda:
+            resultados = df[
+                df["DESCRIPCION"].astype(str).str.contains(busqueda, case=False, na=False)
+            ]
+
+            if resultados.empty:
+                st.warning("No se encontró ningún producto")
+            else:
+                st.subheader("Resultados")
+                st.dataframe(
+                    resultados[columnas_resultado],
+                    use_container_width=True,
+                    hide_index=True
+                )
