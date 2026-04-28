@@ -10,10 +10,13 @@ st.set_page_config(
 
 st.title("🔎 Buscador de precios PRO")
 
+# 🔍 Buscar Excel automáticamente
 def buscar_excel():
     archivos_excel = list(Path(".").glob("*.xlsx")) + list(Path(".").glob("*.xls"))
     return archivos_excel[0] if archivos_excel else None
 
+
+# 💰 Limpiar precios
 def limpiar_precio(valor):
     if pd.isna(valor):
         return None
@@ -35,13 +38,11 @@ def limpiar_precio(valor):
     except:
         return None
 
-def euros(valor):
-    return f"{valor:.2f} €".replace(".", ",")
 
 archivo_excel = buscar_excel()
 
 if archivo_excel is None:
-    st.error("No hay ningún archivo Excel en el repositorio.")
+    st.error("No hay ningún Excel en el repositorio.")
 else:
     st.info(f"Usando archivo: {archivo_excel.name}")
 
@@ -55,9 +56,11 @@ else:
         st.error(f"Faltan columnas: {faltan}")
         st.write("Columnas encontradas:", list(df.columns))
     else:
+        # Limpieza precios
         df["PRECIO"] = df["PRECIO"].apply(limpiar_precio)
         df = df.dropna(subset=["PRECIO"])
 
+        # Cálculos
         df["CLIENTE FINAL"] = df["PRECIO"] / 0.55
         df["ALTA DISTRIBUCION"] = df["PRECIO"] / 0.90
         df["HOSTELERIA"] = df["PRECIO"] / 0.80
@@ -67,12 +70,14 @@ else:
 
         st.success("Tarifa cargada correctamente")
 
+        # 🔘 Selector tipo precio
         tipo_precio = st.radio(
             "Selecciona tarifa",
             ["Coste", "Cliente final", "Alta distribución", "Hostelería", "Todo"],
             horizontal=True
         )
 
+        # 🔎 Buscador
         busqueda = st.text_input("Buscar producto")
 
         if busqueda:
@@ -83,53 +88,26 @@ else:
             if resultados.empty:
                 st.warning("No se encontró ningún producto")
             else:
-                columna_precio = {
-                    "Coste": "PRECIO",
-                    "Cliente final": "CLIENTE FINAL",
-                    "Alta distribución": "ALTA DISTRIBUCION",
-                    "Hostelería": "HOSTELERIA",
+                columnas_map = {
+                    "Coste": ["CODIGO", "DESCRIPCION", "FORMATO", "PRECIO"],
+                    "Cliente final": ["CODIGO", "DESCRIPCION", "FORMATO", "CLIENTE FINAL"],
+                    "Alta distribución": ["CODIGO", "DESCRIPCION", "FORMATO", "ALTA DISTRIBUCION"],
+                    "Hostelería": ["CODIGO", "DESCRIPCION", "FORMATO", "HOSTELERIA"],
+                    "Todo": [
+                        "CODIGO",
+                        "DESCRIPCION",
+                        "FORMATO",
+                        "PRECIO",
+                        "CLIENTE FINAL",
+                        "ALTA DISTRIBUCION",
+                        "HOSTELERIA",
+                    ],
                 }
 
-                if tipo_precio != "Todo":
-                    col = columna_precio[tipo_precio]
+                columnas_mostrar = columnas_map[tipo_precio]
 
-                    for _, fila in resultados.iterrows():
-                        st.markdown("---")
-                        st.subheader(str(fila["DESCRIPCION"]))
-
-                        st.write(f"**Código:** {fila['CODIGO']}")
-                        st.write(f"**Formato:** {fila['FORMATO']}")
-
-                        st.markdown(
-                            f"""
-                            <div style="
-                                font-size:42px;
-                                font-weight:800;
-                                padding:18px;
-                                border-radius:18px;
-                                background:#f1f1f1;
-                                text-align:center;
-                                margin-top:10px;
-                            ">
-                                {euros(fila[col])}
-                            </div>
-                            """,
-                            unsafe_allow_html=True
-                        )
-
-                else:
-                    st.dataframe(
-                        resultados[
-                            [
-                                "CODIGO",
-                                "DESCRIPCION",
-                                "FORMATO",
-                                "PRECIO",
-                                "CLIENTE FINAL",
-                                "ALTA DISTRIBUCION",
-                                "HOSTELERIA",
-                            ]
-                        ],
-                        use_container_width=True,
-                        hide_index=True
-                    )
+                st.dataframe(
+                    resultados[columnas_mostrar],
+                    use_container_width=True,
+                    hide_index=True
+                )
