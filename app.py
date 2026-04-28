@@ -9,10 +9,58 @@ st.markdown("#### 🐟 Precios Pescados Pardo")
 
 st.markdown("""
 <style>
-.block-container {padding-top: 0.6rem; padding-bottom: 0.6rem;}
-div[data-testid="stVerticalBlock"] {gap: 0.25rem;}
-hr {margin: 0.3rem 0;}
-.stButton button {padding: 0.25rem 0.5rem; font-size: 0.85rem;}
+.block-container {
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+}
+
+.producto {
+    font-size: 0.88rem;
+    line-height: 1.15;
+    margin-bottom: 0.25rem;
+}
+
+.acciones {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    margin-top: 0.2rem;
+    margin-bottom: 0.45rem;
+}
+
+.btn-mini {
+    display: inline-block;
+    padding: 6px 12px;
+    border: 1px solid #555;
+    border-radius: 8px;
+    text-decoration: none !important;
+    color: inherit !important;
+    font-weight: 700;
+    min-width: 28px;
+    text-align: center;
+}
+
+.cantidad {
+    font-weight: 800;
+    font-size: 1rem;
+    min-width: 24px;
+    text-align: center;
+}
+
+.btn-add {
+    display: inline-block;
+    padding: 6px 16px;
+    border: 1px solid #555;
+    border-radius: 8px;
+    text-decoration: none !important;
+    color: inherit !important;
+    font-weight: 700;
+}
+
+hr {
+    margin: 0.35rem 0;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -68,8 +116,19 @@ if "pedido" not in st.session_state:
 if "nombre_cliente" not in st.session_state:
     st.session_state.nombre_cliente = ""
 
+if "cantidades" not in st.session_state:
+    st.session_state.cantidades = {}
 
-nombre_cliente = st.text_input("Cliente", value=st.session_state.nombre_cliente)
+if "ultimo_anadido" not in st.session_state:
+    st.session_state.ultimo_anadido = ""
+
+
+nombre_cliente = st.text_input(
+    "Cliente",
+    value=st.session_state.nombre_cliente,
+    placeholder="Nombre del cliente"
+)
+
 st.session_state.nombre_cliente = nombre_cliente.strip()
 
 if not st.session_state.nombre_cliente:
@@ -87,8 +146,19 @@ if archivo is None:
 df = pd.read_excel(archivo)
 df.columns = df.columns.astype(str).str.strip().str.upper()
 
+columnas_necesarias = ["CODIGO", "DESCRIPCION", "FORMATO", "PRECIO"]
+faltan = [col for col in columnas_necesarias if col not in df.columns]
+
+if faltan:
+    st.error(f"Faltan columnas: {faltan}")
+    st.write("Columnas encontradas:", list(df.columns))
+    st.stop()
+
+
 df["PRECIO"] = df["PRECIO"].apply(limpiar_precio)
-df = df.dropna(subset=["PRECIO"])
+df = df.dropna(subset=["PRECIO"]).reset_index(drop=True)
+
+df["ITEM_ID"] = df.index.astype(str)
 
 df["CLIENTE FINAL"] = df["PRECIO"] / 0.55
 df["ALTA DISTRIBUCION"] = df["PRECIO"] / 0.90
@@ -98,9 +168,56 @@ for col in ["PRECIO", "CLIENTE FINAL", "ALTA DISTRIBUCION", "HOSTELERIA"]:
     df[col] = df[col].round(2)
 
 
-if st.session_state.pedido:
-    total = sum(i["cajas"] for i in st.session_state.pedido)
+# Acciones desde botones HTML
+params = st.query_params
 
+accion = params.get("accion", None)
+item_id = params.get("item", None)
+tarifa_param = params.get("tarifa", None)
+
+if accion and item_id is not None:
+    key_cantidad = f"cantidad_{item_id}"
+
+    if key_cantidad not in st.session_state.cantidades:
+        st.session_state.cantidades[key_cantidad] = 1
+
+    if accion == "menos":
+        if st.session_state.cantidades[key_cantidad] > 1:
+            st.session_state.cantidades[key_cantidad] -= 1
+
+    elif accion == "mas":
+        st.session_state.cantidades[key_cantidad] += 1
+
+    elif accion == "add":
+        fila_add = df[df["ITEM_ID"] == str(item_id)]
+
+        if not fila_add.empty:
+            fila_add = fila_add.iloc[0]
+
+            columna_precio_add = {
+                "Coste": "PRECIO",
+                "Cliente final": "CLIENTE FINAL",
+                "Alta distribución": "ALTA DISTRIBUCION",
+                "Hostelería": "HOSTELERIA",
+            }.get(tarifa_param, "PRECIO")
+
+            st.session_state.pedido.append({
+                "cajas": int(st.session_state.cantidades[key_cantidad]),
+                "codigo": str(fila_add["CODIGO"]),
+                "descripcion": str(fila_add["DESCRIPCION"]),
+                "precio": float(fila_add[columna_precio_add]),
+                "formato": str(fila_add["FORMATO"]),
+                "tarifa": tarifa_param or "Coste",
+            })
+
+            st.session_state.ultimo_anadido = str(item_id)
+
+    st.query_params.clear()
+    st.rerun()
+
+
+if st.session_state.pedido:
+    total = sum(item["cajas"] for item in st.session_state.pedido)
     st.success(f"{len(st.session_state.pedido)} productos | {total} cajas")
 
     texto = crear_texto_pedido(st.session_state.nombre_cliente, st.session_state.pedido)
@@ -114,6 +231,8 @@ if st.session_state.pedido:
     with col2:
         if st.button("Vaciar"):
             st.session_state.pedido = []
+            st.session_state.ultimo_anadido = ""
+            st.session_state.cantidades = {}
             st.rerun()
 else:
     st.info(f"Pedido vacío | {st.session_state.nombre_cliente}")
@@ -133,59 +252,49 @@ col_precio = {
 }[tarifa]
 
 
-busqueda = st.text_input("Buscar")
+busqueda = st.text_input("Buscar", placeholder="Ej: anilla, atún, calamar...")
 
 if busqueda:
     resultados = df[
         df["DESCRIPCION"].astype(str).str.contains(busqueda, case=False, na=False)
     ].reset_index(drop=True)
 
-    for i, fila in resultados.iterrows():
-        descripcion = fila["DESCRIPCION"]
-        formato = fila["FORMATO"]
-        precio = fila[col_precio]
+    if resultados.empty:
+        st.warning("No se encontró ningún producto")
+    else:
+        for _, fila in resultados.iterrows():
+            item_id = str(fila["ITEM_ID"])
+            descripcion = str(fila["DESCRIPCION"])
+            formato = str(fila["FORMATO"])
+            precio = float(fila[col_precio])
 
-        key = f"cajas_{i}"
+            key_cantidad = f"cantidad_{item_id}"
 
-        if key not in st.session_state:
-            st.session_state[key] = 1
+            if key_cantidad not in st.session_state.cantidades:
+                st.session_state.cantidades[key_cantidad] = 1
 
-        st.markdown(
-            f"<b>{descripcion}</b> · {euros(precio)} € · {formato}",
-            unsafe_allow_html=True
-        )
+            cantidad = st.session_state.cantidades[key_cantidad]
 
-        col1, col2 = st.columns([1, 1])
+            texto_add = "Añadido" if st.session_state.ultimo_anadido == item_id else "Añadir"
 
-        # 🔥 CANTIDAD EN UNA SOLA LÍNEA
-        with col1:
-            c1, c2, c3 = st.columns([1,1,1])
+            url_menos = f"?accion=menos&item={quote(item_id)}&tarifa={quote(tarifa)}"
+            url_mas = f"?accion=mas&item={quote(item_id)}&tarifa={quote(tarifa)}"
+            url_add = f"?accion=add&item={quote(item_id)}&tarifa={quote(tarifa)}"
 
-            with c1:
-                if st.button("➖", key=f"menos_{i}"):
-                    if st.session_state[key] > 1:
-                        st.session_state[key] -= 1
-                    st.rerun()
+            st.markdown(
+                f"""
+                <div class="producto">
+                    <b>{descripcion}</b> · {euros(precio)} € · {formato}
+                </div>
 
-            with c2:
-                st.markdown(
-                    f"<div style='text-align:center;font-weight:700'>{st.session_state[key]}</div>",
-                    unsafe_allow_html=True
-                )
+                <div class="acciones">
+                    <a class="btn-mini" href="{url_menos}">−</a>
+                    <span class="cantidad">{cantidad}</span>
+                    <a class="btn-mini" href="{url_mas}">+</a>
+                    <a class="btn-add" href="{url_add}">{texto_add}</a>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
 
-            with c3:
-                if st.button("➕", key=f"mas_{i}"):
-                    st.session_state[key] += 1
-                    st.rerun()
-
-        with col2:
-            if st.button("Añadir", key=f"add_{i}"):
-                st.session_state.pedido.append({
-                    "cajas": int(st.session_state[key]),
-                    "descripcion": descripcion,
-                    "precio": precio,
-                    "formato": formato
-                })
-                st.rerun()
-
-        st.markdown("---")
+            st.markdown("---")
