@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import math
 from pathlib import Path
 from urllib.parse import quote
 
@@ -44,10 +43,6 @@ hr {
     font-size: 0.90rem;
     min-height: 2.4rem;
 }
-
-div[data-testid="stNumberInput"] {
-    margin-top: 0.15rem;
-}
 </style>
 """, unsafe_allow_html=True)
 
@@ -89,20 +84,6 @@ def limpiar_precio(valor):
         return float(texto)
     except:
         return None
-
-
-def redondeo_comercial(valor):
-    if pd.isna(valor):
-        return None
-
-    valor = float(valor)
-    centimos = math.ceil(valor * 100)
-
-    resto = centimos % 5
-    if resto != 0:
-        centimos += 5 - resto
-
-    return centimos / 100
 
 
 def euros(valor):
@@ -171,9 +152,9 @@ def cargar_tarifa():
     df["PRECIO"] = df["PRECIO"].apply(limpiar_precio)
     df = df.dropna(subset=["PRECIO"])
 
-    df["CLIENTE FINAL"] = (df["PRECIO"] / 0.55).apply(redondeo_comercial)
-    df["ALTA DISTRIBUCION"] = (df["PRECIO"] / 0.90).apply(redondeo_comercial)
-    df["HOSTELERIA"] = (df["PRECIO"] / 0.80).apply(redondeo_comercial)
+    df["CLIENTE FINAL"] = df["PRECIO"] / 0.55
+    df["ALTA DISTRIBUCION"] = df["PRECIO"] / 0.90
+    df["HOSTELERIA"] = df["PRECIO"] / 0.80
 
     for col in ["PRECIO", "CLIENTE FINAL", "ALTA DISTRIBUCION", "HOSTELERIA"]:
         df[col] = df[col].round(2)
@@ -240,9 +221,43 @@ if st.button("Cerrar sesión"):
     st.rerun()
 
 
+st.markdown("### 🧾 Pedido")
+
 if st.session_state.pedido:
     total = sum(item["cajas"] for item in st.session_state.pedido)
     st.success(f"{len(st.session_state.pedido)} productos | {total} cajas")
+
+    with st.expander("Ver / modificar pedido", expanded=True):
+        for idx, item in enumerate(st.session_state.pedido):
+            st.markdown(
+                f"**{item['descripcion']}**  \n"
+                f"{euros(item['precio'])} € · {item['formato']}"
+            )
+
+            col1, col2, col3 = st.columns([1, 1, 1])
+
+            with col1:
+                nueva_cantidad = st.number_input(
+                    "Cajas",
+                    min_value=1,
+                    value=int(item["cajas"]),
+                    step=1,
+                    key=f"edit_cajas_{idx}",
+                    label_visibility="collapsed"
+                )
+
+                st.session_state.pedido[idx]["cajas"] = int(nueva_cantidad)
+
+            with col2:
+                if st.button("Quitar", key=f"quitar_{idx}"):
+                    st.session_state.pedido.pop(idx)
+                    st.rerun()
+
+            with col3:
+                subtotal = int(st.session_state.pedido[idx]["cajas"]) * float(item["precio"])
+                st.write(f"{euros(subtotal)} €")
+
+            st.markdown("---")
 
     texto = crear_texto_pedido(st.session_state.cliente, st.session_state.pedido)
     url = "https://wa.me/?text=" + quote(texto)
@@ -253,7 +268,7 @@ if st.session_state.pedido:
         st.link_button("Finalizar pedido", url)
 
     with col2:
-        if st.button("Vaciar"):
+        if st.button("Vaciar pedido"):
             st.session_state.pedido = []
             st.rerun()
 else:
