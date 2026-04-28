@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+from pathlib import Path
 
 st.set_page_config(
     page_title="Buscador de precios PRO",
@@ -9,7 +10,13 @@ st.set_page_config(
 
 st.title("🔎 Buscador de precios PRO")
 
-archivo = st.file_uploader("Sube tu Excel", type=["xlsx", "xls"])
+def buscar_excel_en_github():
+    archivos_excel = list(Path(".").glob("*.xlsx")) + list(Path(".").glob("*.xls"))
+
+    if not archivos_excel:
+        return None
+
+    return archivos_excel[0]
 
 def limpiar_precio(valor):
     if pd.isna(valor):
@@ -25,59 +32,58 @@ def limpiar_precio(valor):
     except:
         return None
 
+archivo_excel = buscar_excel_en_github()
 
-if archivo is not None:
-    try:
-        df = pd.read_excel(archivo)
+if archivo_excel is None:
+    st.error("No hay ningún Excel subido en GitHub.")
+else:
+    st.info(f"Usando Excel por defecto: {archivo_excel.name}")
 
-        df.columns = df.columns.astype(str).str.strip().str.upper()
+    df = pd.read_excel(archivo_excel)
 
-        columnas_necesarias = ["CODIGO", "DESCRIPCION", "FORMATO", "PRECIO"]
+    df.columns = df.columns.astype(str).str.strip().str.upper()
 
-        faltan = [col for col in columnas_necesarias if col not in df.columns]
+    columnas_necesarias = ["CODIGO", "DESCRIPCION", "FORMATO", "PRECIO"]
+    faltan = [col for col in columnas_necesarias if col not in df.columns]
 
-        if faltan:
-            st.error(f"Faltan columnas: {faltan}")
-            st.write("Columnas encontradas:", list(df.columns))
+    if faltan:
+        st.error(f"Faltan columnas: {faltan}")
+        st.write("Columnas encontradas:", list(df.columns))
+    else:
+        df["PRECIO"] = df["PRECIO"].apply(limpiar_precio)
+        df = df.dropna(subset=["PRECIO"])
 
-        else:
-            df["PRECIO"] = df["PRECIO"].apply(limpiar_precio)
-            df = df.dropna(subset=["PRECIO"])
+        df["CLIENTE FINAL"] = df["PRECIO"] / 0.55
+        df["ALTA DISTRIBUCION"] = df["PRECIO"] / 0.90
+        df["HOSTELERIA"] = df["PRECIO"] / 0.80
 
-            df["CLIENTE FINAL"] = df["PRECIO"] / 0.55
-            df["ALTA DISTRIBUCION"] = df["PRECIO"] / 0.90
-            df["HOSTELERIA"] = df["PRECIO"] / 0.80
+        for col in ["PRECIO", "CLIENTE FINAL", "ALTA DISTRIBUCION", "HOSTELERIA"]:
+            df[col] = df[col].round(2)
 
-            for col in ["PRECIO", "CLIENTE FINAL", "ALTA DISTRIBUCION", "HOSTELERIA"]:
-                df[col] = df[col].round(2)
+        st.success("Excel cargado correctamente")
 
-            st.success("Excel cargado correctamente")
+        busqueda = st.text_input("Buscar producto")
 
-            busqueda = st.text_input("Buscar producto")
+        if busqueda:
+            resultados = df[
+                df["DESCRIPCION"].astype(str).str.contains(busqueda, case=False, na=False)
+            ]
 
-            if busqueda:
-                resultados = df[
-                    df["DESCRIPCION"].astype(str).str.contains(busqueda, case=False, na=False)
-                ]
-
-                if resultados.empty:
-                    st.warning("No se encontró nada")
-                else:
-                    st.dataframe(
-                        resultados[
-                            [
-                                "CODIGO",
-                                "DESCRIPCION",
-                                "FORMATO",
-                                "PRECIO",
-                                "CLIENTE FINAL",
-                                "ALTA DISTRIBUCION",
-                                "HOSTELERIA",
-                            ]
-                        ],
-                        use_container_width=True,
-                        hide_index=True
-                    )
-
-    except Exception as e:
-        st.error(f"Error al cargar el Excel: {e}")
+            if resultados.empty:
+                st.warning("No se encontró nada")
+            else:
+                st.dataframe(
+                    resultados[
+                        [
+                            "CODIGO",
+                            "DESCRIPCION",
+                            "FORMATO",
+                            "PRECIO",
+                            "CLIENTE FINAL",
+                            "ALTA DISTRIBUCION",
+                            "HOSTELERIA",
+                        ]
+                    ],
+                    use_container_width=True,
+                    hide_index=True
+                )
