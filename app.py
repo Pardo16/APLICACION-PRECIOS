@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from pathlib import Path
+from urllib.parse import quote
 
 st.set_page_config(
     page_title="Buscador de precios PRO",
@@ -10,13 +11,10 @@ st.set_page_config(
 
 st.title("🔎 Buscador de precios PRO")
 
-# 🔍 Buscar Excel automáticamente
 def buscar_excel():
     archivos_excel = list(Path(".").glob("*.xlsx")) + list(Path(".").glob("*.xls"))
     return archivos_excel[0] if archivos_excel else None
 
-
-# 💰 Limpiar precios
 def limpiar_precio(valor):
     if pd.isna(valor):
         return None
@@ -38,6 +36,11 @@ def limpiar_precio(valor):
     except:
         return None
 
+def euros(valor):
+    return f"{float(valor):.2f}".replace(".", ",")
+
+if "pedido" not in st.session_state:
+    st.session_state.pedido = []
 
 archivo_excel = buscar_excel()
 
@@ -56,11 +59,9 @@ else:
         st.error(f"Faltan columnas: {faltan}")
         st.write("Columnas encontradas:", list(df.columns))
     else:
-        # Limpieza precios
         df["PRECIO"] = df["PRECIO"].apply(limpiar_precio)
         df = df.dropna(subset=["PRECIO"])
 
-        # Cálculos
         df["CLIENTE FINAL"] = df["PRECIO"] / 0.55
         df["ALTA DISTRIBUCION"] = df["PRECIO"] / 0.90
         df["HOSTELERIA"] = df["PRECIO"] / 0.80
@@ -68,16 +69,19 @@ else:
         for col in ["PRECIO", "CLIENTE FINAL", "ALTA DISTRIBUCION", "HOSTELERIA"]:
             df[col] = df[col].round(2)
 
-        st.success("Tarifa cargada correctamente")
-
-        # 🔘 Selector tipo precio
-        tipo_precio = st.radio(
+        tarifa = st.radio(
             "Selecciona tarifa",
-            ["Coste", "Cliente final", "Alta distribución", "Hostelería", "Todo"],
+            ["Coste", "Cliente final", "Alta distribución", "Hostelería"],
             horizontal=True
         )
 
-        # 🔎 Buscador
+        columna_precio = {
+            "Coste": "PRECIO",
+            "Cliente final": "CLIENTE FINAL",
+            "Alta distribución": "ALTA DISTRIBUCION",
+            "Hostelería": "HOSTELERIA",
+        }[tarifa]
+
         busqueda = st.text_input("Buscar producto")
 
         if busqueda:
@@ -88,26 +92,73 @@ else:
             if resultados.empty:
                 st.warning("No se encontró ningún producto")
             else:
-                columnas_map = {
-                    "Coste": ["CODIGO", "DESCRIPCION", "PRECIO", "FORMATO"],
-                    "Cliente final": ["CODIGO", "DESCRIPCION", "CLIENTE FINAL", "FORMATO"],
-                    "Alta distribución": ["CODIGO", "DESCRIPCION", "ALTA DISTRIBUCION", "FORMATO"],
-                    "Hostelería": ["CODIGO", "DESCRIPCION", "HOSTELERIA", "FORMATO"],
-                    "Todo": [
-                        "CODIGO",
-                        "DESCRIPCION",
-                        "PRECIO",
-                        "CLIENTE FINAL",
-                        "ALTA DISTRIBUCION",
-                        "HOSTELERIA",
-                        "FORMATO",
-                    ],
-                }
+                st.subheader("Resultados")
 
-                columnas_mostrar = columnas_map[tipo_precio]
+                for i, fila in resultados.reset_index(drop=True).iterrows():
+                    codigo = str(fila["CODIGO"])
+                    descripcion = str(fila["DESCRIPCION"])
+                    formato = str(fila["FORMATO"])
+                    precio = float(fila[columna_precio])
 
-                st.dataframe(
-                    resultados[columnas_mostrar],
-                    use_container_width=True,
-                    hide_index=True
+                    st.markdown("---")
+                    st.write(f"**{codigo} | {descripcion}**")
+                    st.write(f"Precio: **{euros(precio)} €** | Formato: {formato}")
+
+                    col1, col2 = st.columns([1, 1])
+
+                    with col1:
+                        cajas = st.number_input(
+                            "Cajas",
+                            min_value=1,
+                            value=1,
+                            step=1,
+                            key=f"cajas_{i}_{codigo}_{tarifa}"
+                        )
+
+                    with col2:
+                        if st.button("Añadir", key=f"add_{i}_{codigo}_{tarifa}"):
+                            st.session_state.pedido.append({
+                                "cajas": int(cajas),
+                                "codigo": codigo,
+                                "descripcion": descripcion,
+                                "precio": precio,
+                                "formato": formato,
+                                "tarifa": tarifa,
+                            })
+                            st.success("Añadido al pedido")
+
+        st.markdown("---")
+        st.header("🧾 Pedido para WhatsApp")
+
+        if not st.session_state.pedido:
+            st.info("Todavía no has añadido productos.")
+        else:
+            lineas = ["PEDIDO", ""]
+
+            total_cajas = 0
+
+            for item in st.session_state.pedido:
+                total_cajas += item["cajas"]
+                lineas.append(
+                    f"- {item['cajas']} cajas | {item['codigo']} | "
+                    f"{item['descripcion']} | {euros(item['precio'])} € | {item['formato']}"
                 )
+
+            lineas.append("")
+            lineas.append(f"Total cajas: {total_cajas}")
+
+            texto_pedido = "\n".join(lineas)
+
+            st.text_area(
+                "Copia este texto y mándalo por WhatsApp",
+                texto_pedido,
+                height=220
+            )
+
+            whatsapp_url = "https://wa.me/?text=" + quote(texto_pedido)
+
+            st.link_button("Enviar por WhatsApp", whatsapp_url)
+
+            if st.button("Vaciar pedido"):
+                st.session_state.pedido = []
+                st.rerun()
