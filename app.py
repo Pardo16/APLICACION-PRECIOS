@@ -9,19 +9,7 @@ st.set_page_config(
 
 st.title("🔎 Buscador de precios PRO")
 
-modo = st.radio(
-    "Selecciona modo:",
-    ["Usar Excel subido", "Usar Excel por defecto"]
-)
-
-archivo = None
-
-if modo == "Usar Excel subido":
-    archivo = st.file_uploader("Sube tu Excel", type=["xlsx", "xls"])
-
-elif modo == "Usar Excel por defecto":
-    archivo = "tarifa.xlsx"
-
+archivo = st.file_uploader("Sube tu Excel", type=["xlsx", "xls"])
 
 def limpiar_precio(valor):
     if pd.isna(valor):
