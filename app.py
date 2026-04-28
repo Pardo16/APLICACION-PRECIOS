@@ -89,18 +89,18 @@ else:
                 st.warning("No se encontró ningún producto")
             else:
                 columnas_map = {
-                    "Coste": ["CODIGO", "DESCRIPCION", "FORMATO", "PRECIO"],
-                    "Cliente final": ["CODIGO", "DESCRIPCION", "FORMATO", "CLIENTE FINAL"],
-                    "Alta distribución": ["CODIGO", "DESCRIPCION", "FORMATO", "ALTA DISTRIBUCION"],
-                    "Hostelería": ["CODIGO", "DESCRIPCION", "FORMATO", "HOSTELERIA"],
+                    "Coste": ["CODIGO", "DESCRIPCION", "PRECIO", "FORMATO"],
+                    "Cliente final": ["CODIGO", "DESCRIPCION", "CLIENTE FINAL", "FORMATO"],
+                    "Alta distribución": ["CODIGO", "DESCRIPCION", "ALTA DISTRIBUCION", "FORMATO"],
+                    "Hostelería": ["CODIGO", "DESCRIPCION", "HOSTELERIA", "FORMATO"],
                     "Todo": [
                         "CODIGO",
                         "DESCRIPCION",
-                        "FORMATO",
                         "PRECIO",
                         "CLIENTE FINAL",
                         "ALTA DISTRIBUCION",
                         "HOSTELERIA",
+                        "FORMATO",
                     ],
                 }
 
