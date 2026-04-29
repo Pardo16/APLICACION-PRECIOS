@@ -1,5 +1,6 @@
 import base64
 import json
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
 
@@ -71,11 +72,15 @@ GITHUB_TOKEN = get_secret("GITHUB_TOKEN")
 GITHUB_REPO = get_secret("GITHUB_REPO")
 GITHUB_BRANCH = get_secret("GITHUB_BRANCH", "main")
 FAVORITOS_PATH = get_secret("FAVORITOS_PATH", "favoritos.json")
+PEDIDOS_PATH = get_secret("PEDIDOS_PATH", "pedidos.json")
 
 
 def buscar_excel_tarifa():
     archivos = list(Path(".").glob("*.xlsx")) + list(Path(".").glob("*.xls"))
-    archivos = [a for a in archivos if a.name.lower() != "clientes.xlsx"]
+    archivos = [
+        a for a in archivos
+        if a.name.lower() not in ["clientes.xlsx"]
+    ]
     return archivos[0] if archivos else None
 
 
@@ -106,6 +111,147 @@ def limpiar_precio(valor):
 
 def euros(valor):
     return f"{float(valor):.2f}".replace(".", ",")
+
+
+def github_headers():
+    return {
+        "Authorization": f"Bearer {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github+json",
+    }
+
+
+def github_url(path):
+    return f"https://api.github.com/repos/{GITHUB_REPO}/contents/{path}"
+
+
+def cargar_json_github(path):
+    if GITHUB_TOKEN and GITHUB_REPO:
+        try:
+            r = requests.get(
+                github_url(path),
+                headers=github_headers(),
+                params={"ref": GITHUB_BRANCH},
+                timeout=15
+            )
+
+            if r.status_code == 200:
+                data = r.json()
+                contenido = base64.b64decode(data["content"]).decode("utf-8")
+                return json.loads(contenido or "{}"), data.get("sha")
+
+        except Exception:
+            pass
+
+    archivo_local = Path(path)
+
+    if archivo_local.exists():
+        try:
+            return json.loads(archivo_local.read_text(encoding="utf-8") or "{}"), None
+        except Exception:
+            return {}, None
+
+    return {}, None
+
+
+def guardar_json_github(path, datos, sha_actual=None, mensaje="Actualizar datos"):
+    contenido_json = json.dumps(datos, ensure_ascii=False, indent=2)
+
+    if GITHUB_TOKEN and GITHUB_REPO:
+        try:
+            payload = {
+                "message": mensaje,
+                "content": base64.b64encode(contenido_json.encode("utf-8")).decode("utf-8"),
+                "branch": GITHUB_BRANCH,
+            }
+
+            if sha_actual:
+                payload["sha"] = sha_actual
+
+            r = requests.put(
+                github_url(path),
+                headers=github_headers(),
+                json=payload,
+                timeout=15
+            )
+
+            return r.status_code in [200, 201]
+
+        except Exception:
+            return False
+
+    try:
+        Path(path).write_text(contenido_json, encoding="utf-8")
+        return True
+    except Exception:
+        return False
+
+
+def cargar_favoritos():
+    return cargar_json_github(FAVORITOS_PATH)
+
+
+def guardar_favoritos(favoritos, sha):
+    return guardar_json_github(
+        FAVORITOS_PATH,
+        favoritos,
+        sha,
+        "Actualizar favoritos"
+    )
+
+
+def cargar_pedidos():
+    return cargar_json_github(PEDIDOS_PATH)
+
+
+def guardar_pedidos(pedidos, sha):
+    return guardar_json_github(
+        PEDIDOS_PATH,
+        pedidos,
+        sha,
+        "Actualizar pedidos"
+    )
+
+
+def registrar_favorito(n_cliente, codigo, cajas):
+    favoritos, sha = cargar_favoritos()
+
+    n_cliente = str(n_cliente)
+    codigo = str(codigo)
+
+    if n_cliente not in favoritos:
+        favoritos[n_cliente] = {}
+
+    if codigo not in favoritos[n_cliente]:
+        favoritos[n_cliente][codigo] = 0
+
+    favoritos[n_cliente][codigo] += int(cajas)
+
+    guardar_favoritos(favoritos, sha)
+
+
+def productos_favoritos(df, n_cliente):
+    favoritos, _ = cargar_favoritos()
+    datos_cliente = favoritos.get(str(n_cliente), {})
+
+    if not datos_cliente:
+        return pd.DataFrame()
+
+    codigos_ordenados = sorted(
+        datos_cliente.keys(),
+        key=lambda c: datos_cliente[c],
+        reverse=True
+    )
+
+    df_fav = df[df["CODIGO"].astype(str).isin(codigos_ordenados)].copy()
+
+    if df_fav.empty:
+        return df_fav
+
+    df_fav["ORDEN_FAVORITO"] = df_fav["CODIGO"].astype(str).map(
+        {codigo: i for i, codigo in enumerate(codigos_ordenados)}
+    )
+
+    return df_fav.sort_values("ORDEN_FAVORITO").drop(columns=["ORDEN_FAVORITO"])
 
 
 def cargar_clientes():
@@ -165,135 +311,19 @@ def cargar_tarifa():
     return df
 
 
-def github_headers():
-    return {
-        "Authorization": f"Bearer {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github+json",
-    }
-
-
-def github_url():
-    return f"https://api.github.com/repos/{GITHUB_REPO}/contents/{FAVORITOS_PATH}"
-
-
-def cargar_favoritos():
-    if GITHUB_TOKEN and GITHUB_REPO:
-        try:
-            r = requests.get(
-                github_url(),
-                headers=github_headers(),
-                params={"ref": GITHUB_BRANCH},
-                timeout=15
-            )
-
-            if r.status_code == 200:
-                data = r.json()
-                contenido = base64.b64decode(data["content"]).decode("utf-8")
-                return json.loads(contenido or "{}"), data.get("sha")
-
-        except Exception:
-            pass
-
-    archivo_local = Path("favoritos.json")
-
-    if archivo_local.exists():
-        try:
-            return json.loads(archivo_local.read_text(encoding="utf-8") or "{}"), None
-        except Exception:
-            return {}, None
-
-    return {}, None
-
-
-def guardar_favoritos(favoritos, sha_actual=None):
-    contenido_json = json.dumps(favoritos, ensure_ascii=False, indent=2)
-
-    if GITHUB_TOKEN and GITHUB_REPO:
-        try:
-            payload = {
-                "message": "Actualizar favoritos",
-                "content": base64.b64encode(contenido_json.encode("utf-8")).decode("utf-8"),
-                "branch": GITHUB_BRANCH,
-            }
-
-            if sha_actual:
-                payload["sha"] = sha_actual
-
-            r = requests.put(
-                github_url(),
-                headers=github_headers(),
-                json=payload,
-                timeout=15
-            )
-
-            return r.status_code in [200, 201]
-
-        except Exception:
-            return False
-
-    try:
-        Path("favoritos.json").write_text(contenido_json, encoding="utf-8")
-        return True
-    except Exception:
-        return False
-
-
-def registrar_favorito(n_cliente, codigo, cajas):
-    favoritos, sha = cargar_favoritos()
-
-    n_cliente = str(n_cliente)
-    codigo = str(codigo)
-
-    if n_cliente not in favoritos:
-        favoritos[n_cliente] = {}
-
-    if codigo not in favoritos[n_cliente]:
-        favoritos[n_cliente][codigo] = 0
-
-    favoritos[n_cliente][codigo] += int(cajas)
-
-    guardar_favoritos(favoritos, sha)
-
-
-def productos_favoritos(df, n_cliente):
-    favoritos, _ = cargar_favoritos()
-
-    datos_cliente = favoritos.get(str(n_cliente), {})
-
-    if not datos_cliente:
-        return pd.DataFrame()
-
-    codigos_ordenados = sorted(
-        datos_cliente.keys(),
-        key=lambda c: datos_cliente[c],
-        reverse=True
-    )
-
-    df_fav = df[df["CODIGO"].astype(str).isin(codigos_ordenados)].copy()
-
-    if df_fav.empty:
-        return df_fav
-
-    df_fav["ORDEN_FAVORITO"] = df_fav["CODIGO"].astype(str).map(
-        {codigo: i for i, codigo in enumerate(codigos_ordenados)}
-    )
-
-    return df_fav.sort_values("ORDEN_FAVORITO").drop(columns=["ORDEN_FAVORITO"])
-
-
 def crear_texto_pedido(cliente, pedido):
     lineas = ["PEDIDO", f"Cliente: {cliente}", ""]
-    total = 0
+    total_cajas = 0
 
     for item in pedido:
-        total += item["cajas"]
+        total_cajas += int(item["cajas"])
         lineas.append(
             f"- {item['cajas']} cajas | {item['descripcion']} | "
             f"{euros(item['precio'])} € | {item['formato']}"
         )
 
     lineas.append("")
-    lineas.append(f"Total cajas: {total}")
+    lineas.append(f"Total cajas: {total_cajas}")
     return "\n".join(lineas)
 
 
@@ -303,10 +333,70 @@ def agregar_al_pedido(item_nuevo):
         misma_tarifa = str(item.get("tarifa")) == str(item_nuevo.get("tarifa"))
 
         if mismo_codigo and misma_tarifa:
-            item["cajas"] += item_nuevo["cajas"]
+            item["cajas"] = int(item["cajas"]) + int(item_nuevo["cajas"])
             return
 
     st.session_state.pedido.append(item_nuevo)
+
+
+def guardar_pedido_historico():
+    pedidos, sha = cargar_pedidos()
+
+    n_cliente = str(st.session_state.n_cliente)
+
+    if n_cliente not in pedidos:
+        pedidos[n_cliente] = []
+
+    nuevo_pedido = {
+        "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "cliente": st.session_state.cliente,
+        "n_cliente": st.session_state.n_cliente,
+        "productos": st.session_state.pedido,
+    }
+
+    pedidos[n_cliente].append(nuevo_pedido)
+
+    guardar_pedidos(pedidos, sha)
+
+
+def obtener_ultimo_pedido(n_cliente):
+    pedidos, _ = cargar_pedidos()
+    lista = pedidos.get(str(n_cliente), [])
+
+    if not lista:
+        return None
+
+    return lista[-1]
+
+
+def obtener_historico_cliente(n_cliente):
+    pedidos, _ = cargar_pedidos()
+    return pedidos.get(str(n_cliente), [])
+
+
+def recalcular_pedido_con_tarifa_actual(pedido, df, tarifa_visible):
+    col_precio = TARIFAS[tarifa_visible]
+    pedido_recalculado = []
+
+    for item in pedido:
+        codigo = str(item.get("codigo"))
+        fila = df[df["CODIGO"].astype(str) == codigo]
+
+        if fila.empty:
+            continue
+
+        fila = fila.iloc[0]
+
+        pedido_recalculado.append({
+            "cajas": int(item.get("cajas", 1)),
+            "codigo": str(fila["CODIGO"]),
+            "descripcion": str(fila["DESCRIPCION"]),
+            "precio": float(fila[col_precio]),
+            "formato": str(fila["FORMATO"]),
+            "tarifa": tarifa_visible,
+        })
+
+    return pedido_recalculado
 
 
 if "logueado" not in st.session_state:
@@ -353,6 +443,7 @@ if not st.session_state.logueado:
             st.session_state.cliente = str(usuario["CLIENTE"])
             st.session_state.tarifa_cliente = str(usuario["TARIFA"]).upper()
             st.session_state.pedido = []
+            st.session_state.ultimo_anadido = ""
 
             st.rerun()
 
@@ -373,11 +464,70 @@ if st.button("Cerrar sesión"):
     st.rerun()
 
 
+tarifa_cliente = st.session_state.tarifa_cliente
+
+if tarifa_cliente == "TODAS":
+    tarifa_visible = st.radio(
+        "Tarifa",
+        ["1", "2", "3", "4"],
+        horizontal=True,
+        format_func=lambda x: f"Tarifa {x}"
+    )
+else:
+    tarifa_visible = tarifa_cliente
+    st.info(f"Tarifa {tarifa_visible}")
+
+if tarifa_visible not in TARIFAS:
+    st.error("La tarifa asignada no es válida. Usa 1, 2, 3, 4 o TODAS en clientes.xlsx.")
+    st.stop()
+
+col_precio = TARIFAS[tarifa_visible]
+
+
 st.markdown("### 🧾 Pedido")
 
+ultimo_pedido = obtener_ultimo_pedido(st.session_state.n_cliente)
+
+if ultimo_pedido and not st.session_state.pedido:
+    fecha_ultimo = ultimo_pedido.get("fecha", "")
+    st.info(f"Último pedido disponible: {fecha_ultimo}")
+
+    if st.button("Repetir último pedido"):
+        st.session_state.pedido = recalcular_pedido_con_tarifa_actual(
+            ultimo_pedido.get("productos", []),
+            df,
+            tarifa_visible
+        )
+        st.rerun()
+
+
+historico_cliente = obtener_historico_cliente(st.session_state.n_cliente)
+
+if historico_cliente:
+    with st.expander("Ver histórico de pedidos", expanded=False):
+        for pedido_hist in reversed(historico_cliente[-5:]):
+            st.markdown(f"**{pedido_hist.get('fecha', '')}**")
+            productos_hist = pedido_hist.get("productos", [])
+
+            for item in productos_hist:
+                st.write(
+                    f"{item.get('cajas')} cajas | "
+                    f"{item.get('descripcion')} | "
+                    f"{euros(item.get('precio', 0))} € | "
+                    f"{item.get('formato')}"
+                )
+
+            st.markdown("---")
+
+
 if st.session_state.pedido:
-    total = sum(item["cajas"] for item in st.session_state.pedido)
-    st.success(f"{len(st.session_state.pedido)} productos | {total} cajas")
+    total = sum(int(item["cajas"]) for item in st.session_state.pedido)
+    total_importe = sum(int(item["cajas"]) * float(item["precio"]) for item in st.session_state.pedido)
+
+    st.success(
+        f"{len(st.session_state.pedido)} productos | "
+        f"{total} cajas | Total: {euros(total_importe)} €"
+    )
 
     with st.expander("Ver / modificar pedido", expanded=False):
         for idx, item in enumerate(st.session_state.pedido):
@@ -416,34 +566,19 @@ if st.session_state.pedido:
     col1, col2 = st.columns(2)
 
     with col1:
-        st.link_button("Finalizar pedido", url)
+        if st.link_button("Finalizar pedido", url):
+            pass
 
     with col2:
-        if st.button("Vaciar pedido"):
-            st.session_state.pedido = []
-            st.rerun()
+        if st.button("Guardar pedido"):
+            guardar_pedido_historico()
+            st.success("Pedido guardado en histórico")
+
+    if st.button("Vaciar pedido"):
+        st.session_state.pedido = []
+        st.rerun()
 else:
     st.info("Pedido vacío")
-
-
-tarifa_cliente = st.session_state.tarifa_cliente
-
-if tarifa_cliente == "TODAS":
-    tarifa_visible = st.radio(
-        "Tarifa",
-        ["1", "2", "3", "4"],
-        horizontal=True,
-        format_func=lambda x: f"Tarifa {x}"
-    )
-else:
-    tarifa_visible = tarifa_cliente
-    st.info(f"Tarifa {tarifa_visible}")
-
-if tarifa_visible not in TARIFAS:
-    st.error("La tarifa asignada no es válida. Usa 1, 2, 3, 4 o TODAS en clientes.xlsx.")
-    st.stop()
-
-col_precio = TARIFAS[tarifa_visible]
 
 
 busqueda = st.text_input("Buscar", placeholder="Ej: anilla, atún, calamar...")
@@ -500,7 +635,6 @@ else:
 
         with col2:
             boton_id = f"{codigo}_{tarifa_visible}"
-
             texto_boton = "✅ Añadido" if st.session_state.ultimo_anadido == boton_id else "Añadir"
 
             if st.button(texto_boton, key=f"add_{i}_{codigo}_{tarifa_visible}_{busqueda}"):
