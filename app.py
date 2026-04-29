@@ -1,7 +1,12 @@
-import streamlit as st
-import pandas as pd
+import base64
+import json
 from pathlib import Path
 from urllib.parse import quote
+
+import pandas as pd
+import requests
+import streamlit as st
+
 
 st.set_page_config(
     page_title="Precios Pescados Pardo",
@@ -55,6 +60,19 @@ TARIFAS = {
 }
 
 
+def get_secret(nombre, defecto=""):
+    try:
+        return st.secrets.get(nombre, defecto)
+    except Exception:
+        return defecto
+
+
+GITHUB_TOKEN = get_secret("GITHUB_TOKEN")
+GITHUB_REPO = get_secret("GITHUB_REPO")
+GITHUB_BRANCH = get_secret("GITHUB_BRANCH", "main")
+FAVORITOS_PATH = get_secret("FAVORITOS_PATH", "favoritos.json")
+
+
 def buscar_excel_tarifa():
     archivos = list(Path(".").glob("*.xlsx")) + list(Path(".").glob("*.xls"))
     archivos = [a for a in archivos if a.name.lower() != "clientes.xlsx"]
@@ -82,28 +100,12 @@ def limpiar_precio(valor):
 
     try:
         return float(texto)
-    except:
+    except Exception:
         return None
 
 
 def euros(valor):
     return f"{float(valor):.2f}".replace(".", ",")
-
-
-def crear_texto_pedido(cliente, pedido):
-    lineas = ["PEDIDO", f"Cliente: {cliente}", ""]
-    total = 0
-
-    for item in pedido:
-        total += item["cajas"]
-        lineas.append(
-            f"- {item['cajas']} cajas | {item['descripcion']} | "
-            f"{euros(item['precio'])} € | {item['formato']}"
-        )
-
-    lineas.append("")
-    lineas.append(f"Total cajas: {total}")
-    return "\n".join(lineas)
 
 
 def cargar_clientes():
@@ -149,6 +151,7 @@ def cargar_tarifa():
         st.write("Columnas encontradas:", list(df.columns))
         st.stop()
 
+    df["CODIGO"] = df["CODIGO"].astype(str).str.strip()
     df["PRECIO"] = df["PRECIO"].apply(limpiar_precio)
     df = df.dropna(subset=["PRECIO"])
 
@@ -160,6 +163,150 @@ def cargar_tarifa():
         df[col] = df[col].round(2)
 
     return df
+
+
+def github_headers():
+    return {
+        "Authorization": f"Bearer {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github+json",
+    }
+
+
+def github_url():
+    return f"https://api.github.com/repos/{GITHUB_REPO}/contents/{FAVORITOS_PATH}"
+
+
+def cargar_favoritos():
+    if GITHUB_TOKEN and GITHUB_REPO:
+        try:
+            r = requests.get(
+                github_url(),
+                headers=github_headers(),
+                params={"ref": GITHUB_BRANCH},
+                timeout=15
+            )
+
+            if r.status_code == 200:
+                data = r.json()
+                contenido = base64.b64decode(data["content"]).decode("utf-8")
+                return json.loads(contenido or "{}"), data.get("sha")
+
+        except Exception:
+            pass
+
+    archivo_local = Path("favoritos.json")
+
+    if archivo_local.exists():
+        try:
+            return json.loads(archivo_local.read_text(encoding="utf-8") or "{}"), None
+        except Exception:
+            return {}, None
+
+    return {}, None
+
+
+def guardar_favoritos(favoritos, sha_actual=None):
+    contenido_json = json.dumps(favoritos, ensure_ascii=False, indent=2)
+
+    if GITHUB_TOKEN and GITHUB_REPO:
+        try:
+            payload = {
+                "message": "Actualizar favoritos",
+                "content": base64.b64encode(contenido_json.encode("utf-8")).decode("utf-8"),
+                "branch": GITHUB_BRANCH,
+            }
+
+            if sha_actual:
+                payload["sha"] = sha_actual
+
+            r = requests.put(
+                github_url(),
+                headers=github_headers(),
+                json=payload,
+                timeout=15
+            )
+
+            return r.status_code in [200, 201]
+
+        except Exception:
+            return False
+
+    try:
+        Path("favoritos.json").write_text(contenido_json, encoding="utf-8")
+        return True
+    except Exception:
+        return False
+
+
+def registrar_favorito(n_cliente, codigo, cajas):
+    favoritos, sha = cargar_favoritos()
+
+    n_cliente = str(n_cliente)
+    codigo = str(codigo)
+
+    if n_cliente not in favoritos:
+        favoritos[n_cliente] = {}
+
+    if codigo not in favoritos[n_cliente]:
+        favoritos[n_cliente][codigo] = 0
+
+    favoritos[n_cliente][codigo] += int(cajas)
+
+    guardar_favoritos(favoritos, sha)
+
+
+def productos_favoritos(df, n_cliente):
+    favoritos, _ = cargar_favoritos()
+
+    datos_cliente = favoritos.get(str(n_cliente), {})
+
+    if not datos_cliente:
+        return pd.DataFrame()
+
+    codigos_ordenados = sorted(
+        datos_cliente.keys(),
+        key=lambda c: datos_cliente[c],
+        reverse=True
+    )
+
+    df_fav = df[df["CODIGO"].astype(str).isin(codigos_ordenados)].copy()
+
+    if df_fav.empty:
+        return df_fav
+
+    df_fav["ORDEN_FAVORITO"] = df_fav["CODIGO"].astype(str).map(
+        {codigo: i for i, codigo in enumerate(codigos_ordenados)}
+    )
+
+    return df_fav.sort_values("ORDEN_FAVORITO").drop(columns=["ORDEN_FAVORITO"])
+
+
+def crear_texto_pedido(cliente, pedido):
+    lineas = ["PEDIDO", f"Cliente: {cliente}", ""]
+    total = 0
+
+    for item in pedido:
+        total += item["cajas"]
+        lineas.append(
+            f"- {item['cajas']} cajas | {item['descripcion']} | "
+            f"{euros(item['precio'])} € | {item['formato']}"
+        )
+
+    lineas.append("")
+    lineas.append(f"Total cajas: {total}")
+    return "\n".join(lineas)
+
+
+def agregar_al_pedido(item_nuevo):
+    for item in st.session_state.pedido:
+        mismo_codigo = str(item.get("codigo")) == str(item_nuevo.get("codigo"))
+        misma_tarifa = str(item.get("tarifa")) == str(item_nuevo.get("tarifa"))
+
+        if mismo_codigo and misma_tarifa:
+            item["cajas"] += item_nuevo["cajas"]
+            return
+
+    st.session_state.pedido.append(item_nuevo)
 
 
 if "logueado" not in st.session_state:
@@ -177,11 +324,14 @@ if "n_cliente" not in st.session_state:
 if "tarifa_cliente" not in st.session_state:
     st.session_state.tarifa_cliente = ""
 
+if "ultimo_anadido" not in st.session_state:
+    st.session_state.ultimo_anadido = ""
+
 
 if not st.session_state.logueado:
     st.markdown("### Acceso cliente")
 
-    n_cliente = st.text_input("Nº cliente")
+    n_cliente = st.text_input("Nº cliente", value=st.session_state.get("n_cliente_login", ""))
     password = st.text_input("Contraseña", type="password")
 
     if st.button("Entrar"):
@@ -199,6 +349,7 @@ if not st.session_state.logueado:
 
             st.session_state.logueado = True
             st.session_state.n_cliente = str(usuario["N_CLIENTE"])
+            st.session_state.n_cliente_login = str(usuario["N_CLIENTE"])
             st.session_state.cliente = str(usuario["CLIENTE"])
             st.session_state.tarifa_cliente = str(usuario["TARIFA"]).upper()
             st.session_state.pedido = []
@@ -218,6 +369,7 @@ if st.button("Cerrar sesión"):
     st.session_state.cliente = ""
     st.session_state.n_cliente = ""
     st.session_state.tarifa_cliente = ""
+    st.session_state.ultimo_anadido = ""
     st.rerun()
 
 
@@ -227,7 +379,7 @@ if st.session_state.pedido:
     total = sum(item["cajas"] for item in st.session_state.pedido)
     st.success(f"{len(st.session_state.pedido)} productos | {total} cajas")
 
-    with st.expander("Ver / modificar pedido", expanded=True):
+    with st.expander("Ver / modificar pedido", expanded=False):
         for idx, item in enumerate(st.session_state.pedido):
             st.markdown(
                 f"**{item['descripcion']}**  \n"
@@ -245,7 +397,6 @@ if st.session_state.pedido:
                     key=f"edit_cajas_{idx}",
                     label_visibility="collapsed"
                 )
-
                 st.session_state.pedido[idx]["cajas"] = int(nueva_cantidad)
 
             with col2:
@@ -302,14 +453,19 @@ if busqueda:
         df["DESCRIPCION"].astype(str).str.contains(busqueda, case=False, na=False)
     ].reset_index(drop=True)
 else:
-    resultados = df.head(30).reset_index(drop=True)
+    favoritos_df = productos_favoritos(df, st.session_state.n_cliente)
+
+    if not favoritos_df.empty:
+        st.caption("Productos habituales")
+        resultados = favoritos_df.head(30).reset_index(drop=True)
+    else:
+        st.caption("Mostrando primeros 30 productos. Usa el buscador para filtrar.")
+        resultados = df.head(30).reset_index(drop=True)
+
 
 if resultados.empty:
     st.warning("No se encontró ningún producto")
 else:
-    if not busqueda:
-        st.caption("Mostrando primeros 30 productos. Usa el buscador para filtrar.")
-
     for i, fila in resultados.iterrows():
         codigo = str(fila["CODIGO"])
         descripcion = str(fila["DESCRIPCION"])
@@ -343,8 +499,12 @@ else:
             )
 
         with col2:
-            if st.button("Añadir", key=f"add_{i}_{codigo}_{tarifa_visible}_{busqueda}"):
-                st.session_state.pedido.append({
+            boton_id = f"{codigo}_{tarifa_visible}"
+
+            texto_boton = "✅ Añadido" if st.session_state.ultimo_anadido == boton_id else "Añadir"
+
+            if st.button(texto_boton, key=f"add_{i}_{codigo}_{tarifa_visible}_{busqueda}"):
+                agregar_al_pedido({
                     "cajas": int(cajas),
                     "codigo": codigo,
                     "descripcion": descripcion,
@@ -352,6 +512,14 @@ else:
                     "formato": formato,
                     "tarifa": tarifa_visible,
                 })
+
+                registrar_favorito(
+                    st.session_state.n_cliente,
+                    codigo,
+                    int(cajas)
+                )
+
+                st.session_state.ultimo_anadido = boton_id
                 st.rerun()
 
         st.markdown("---")
