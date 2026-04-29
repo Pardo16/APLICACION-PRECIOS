@@ -19,9 +19,18 @@ st.markdown("#### 🐟 Precios Pescados Pardo")
 
 st.markdown("""
 <style>
+.stApp {
+    background-color: #40E0D0;
+    color: black;
+}
+
 .block-container {
     padding-top: 0.6rem;
     padding-bottom: 0.8rem;
+}
+
+div, p, span, label, h1, h2, h3, h4, h5, h6 {
+    color: black !important;
 }
 
 div[data-testid="stVerticalBlock"] {
@@ -30,6 +39,7 @@ div[data-testid="stVerticalBlock"] {
 
 hr {
     margin: 0.75rem 0;
+    border-color: black;
 }
 
 .producto {
@@ -38,16 +48,44 @@ hr {
     margin-bottom: 0.75rem;
     padding-bottom: 0.35rem;
     display: block;
+    color: black;
 }
 
 .producto b {
     font-weight: 800;
+    color: black;
 }
 
 .stButton button {
     padding: 0.35rem 0.6rem;
     font-size: 0.90rem;
     min-height: 2.4rem;
+    color: black !important;
+    border: 1px solid black !important;
+}
+
+input, textarea {
+    color: black !important;
+    border-color: #00A86B !important;
+}
+
+input:focus, textarea:focus {
+    border-color: #00A86B !important;
+    box-shadow: 0 0 0 1px #00A86B !important;
+    outline: none !important;
+}
+
+div[data-baseweb="input"] {
+    border-color: #00A86B !important;
+}
+
+div[data-baseweb="input"]:focus-within {
+    border-color: #00A86B !important;
+    box-shadow: 0 0 0 1px #00A86B !important;
+}
+
+div[data-baseweb="select"] {
+    border-color: #00A86B !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -522,11 +560,10 @@ if historico_cliente:
 
 if st.session_state.pedido:
     total = sum(int(item["cajas"]) for item in st.session_state.pedido)
-    total_importe = sum(int(item["cajas"]) * float(item["precio"]) for item in st.session_state.pedido)
 
     st.success(
         f"{len(st.session_state.pedido)} productos | "
-        f"{total} cajas | Total: {euros(total_importe)} €"
+        f"{total} cajas"
     )
 
     with st.expander("Ver / modificar pedido", expanded=False):
@@ -555,8 +592,7 @@ if st.session_state.pedido:
                     st.rerun()
 
             with col3:
-                subtotal = int(st.session_state.pedido[idx]["cajas"]) * float(item["precio"])
-                st.write(f"{euros(subtotal)} €")
+                st.write(f"{int(st.session_state.pedido[idx]['cajas'])} cajas")
 
             st.markdown("---")
 
@@ -566,8 +602,7 @@ if st.session_state.pedido:
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.link_button("Finalizar pedido", url):
-            pass
+        st.link_button("Finalizar pedido", url)
 
     with col2:
         if st.button("Guardar pedido"):
