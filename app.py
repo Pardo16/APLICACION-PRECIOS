@@ -24,13 +24,53 @@ st.markdown("""
     color: black;
 }
 
+div, p, span, label, h1, h2, h3, h4, h5, h6 {
+    color: black !important;
+}
+
+input {
+    background-color: white !important;
+    color: black !important;
+    border: 2px solid #00A86B !important;
+}
+
+textarea {
+    background-color: white !important;
+    color: black !important;
+    border: 2px solid #00A86B !important;
+}
+
+div[data-baseweb="input"] {
+    background-color: white !important;
+    border-radius: 6px;
+}
+
+div[data-baseweb="input"]:focus-within {
+    border: 2px solid #00A86B !important;
+    box-shadow: 0 0 0 1px #00A86B !important;
+}
+
+input[type="number"] {
+    background-color: white !important;
+    color: black !important;
+}
+
+div[data-baseweb="select"] {
+    background-color: white !important;
+}
+
+.stButton button {
+    background-color: white !important;
+    color: black !important;
+    border: 1px solid black !important;
+    padding: 0.35rem 0.6rem;
+    font-size: 0.90rem;
+    min-height: 2.4rem;
+}
+
 .block-container {
     padding-top: 0.6rem;
     padding-bottom: 0.8rem;
-}
-
-div, p, span, label, h1, h2, h3, h4, h5, h6 {
-    color: black !important;
 }
 
 div[data-testid="stVerticalBlock"] {
@@ -54,38 +94,6 @@ hr {
 .producto b {
     font-weight: 800;
     color: black;
-}
-
-.stButton button {
-    padding: 0.35rem 0.6rem;
-    font-size: 0.90rem;
-    min-height: 2.4rem;
-    color: black !important;
-    border: 1px solid black !important;
-}
-
-input, textarea {
-    color: black !important;
-    border-color: #00A86B !important;
-}
-
-input:focus, textarea:focus {
-    border-color: #00A86B !important;
-    box-shadow: 0 0 0 1px #00A86B !important;
-    outline: none !important;
-}
-
-div[data-baseweb="input"] {
-    border-color: #00A86B !important;
-}
-
-div[data-baseweb="input"]:focus-within {
-    border-color: #00A86B !important;
-    box-shadow: 0 0 0 1px #00A86B !important;
-}
-
-div[data-baseweb="select"] {
-    border-color: #00A86B !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -115,10 +123,7 @@ PEDIDOS_PATH = get_secret("PEDIDOS_PATH", "pedidos.json")
 
 def buscar_excel_tarifa():
     archivos = list(Path(".").glob("*.xlsx")) + list(Path(".").glob("*.xls"))
-    archivos = [
-        a for a in archivos
-        if a.name.lower() not in ["clientes.xlsx"]
-    ]
+    archivos = [a for a in archivos if a.name.lower() not in ["clientes.xlsx"]]
     return archivos[0] if archivos else None
 
 
@@ -228,26 +233,8 @@ def cargar_favoritos():
     return cargar_json_github(FAVORITOS_PATH)
 
 
-def guardar_favoritos(favoritos, sha):
-    return guardar_json_github(
-        FAVORITOS_PATH,
-        favoritos,
-        sha,
-        "Actualizar favoritos"
-    )
-
-
 def cargar_pedidos():
     return cargar_json_github(PEDIDOS_PATH)
-
-
-def guardar_pedidos(pedidos, sha):
-    return guardar_json_github(
-        PEDIDOS_PATH,
-        pedidos,
-        sha,
-        "Actualizar pedidos"
-    )
 
 
 def registrar_favorito(n_cliente, codigo, cajas):
@@ -264,7 +251,12 @@ def registrar_favorito(n_cliente, codigo, cajas):
 
     favoritos[n_cliente][codigo] += int(cajas)
 
-    guardar_favoritos(favoritos, sha)
+    guardar_json_github(
+        FAVORITOS_PATH,
+        favoritos,
+        sha,
+        "Actualizar favoritos"
+    )
 
 
 def productos_favoritos(df, n_cliente):
@@ -379,7 +371,6 @@ def agregar_al_pedido(item_nuevo):
 
 def guardar_pedido_historico():
     pedidos, sha = cargar_pedidos()
-
     n_cliente = str(st.session_state.n_cliente)
 
     if n_cliente not in pedidos:
@@ -394,7 +385,12 @@ def guardar_pedido_historico():
 
     pedidos[n_cliente].append(nuevo_pedido)
 
-    guardar_pedidos(pedidos, sha)
+    guardar_json_github(
+        PEDIDOS_PATH,
+        pedidos,
+        sha,
+        "Actualizar pedidos"
+    )
 
 
 def obtener_ultimo_pedido(n_cliente):
