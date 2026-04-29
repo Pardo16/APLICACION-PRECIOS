@@ -1,1 +1,19 @@
-{}
+{
+  "70": [
+    {
+      "fecha": "2026-04-29 15:09:27",
+      "cliente": "MARTINEZ VILLAFRANCA MI Y SALVATIERRA ALAVA MJ",
+      "n_cliente": "70",
+      "productos": [
+        {
+          "cajas": 1,
+          "codigo": "99301033",
+          "descripcion": "ABANICO IBER.BELLOT +-6k.YERBAS BAJAS",
+          "precio": 19.88,
+          "formato": "Kgs",
+          "tarifa": "4"
+        }
+      ]
+    }
+  ]
+}
