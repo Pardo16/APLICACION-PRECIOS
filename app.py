@@ -1,527 +1,710 @@
-import asyncio
-from datetime import time
+import base64
+import json
+from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 
-from async_rithmic import DataType
+import pandas as pd
+import requests
+import streamlit as st
 
-from rithmic_bot_vaciodevela.application.services.dashboard_service import DashboardService
-from rithmic_bot_vaciodevela.application.services.execution_service import ExecutionService
-from rithmic_bot_vaciodevela.application.services.live_closed_bar_orchestrator import (
-    LiveClosedBarOrchestrator,
+
+st.set_page_config(
+    page_title="Precios Pescados Pardo",
+    page_icon="🐟",
+    layout="centered"
 )
-from rithmic_bot_vaciodevela.application.services.telegram_service import TelegramService
-from rithmic_bot_vaciodevela.application.services.terminal_event_notifier import (
-    TerminalEventNotifier,
-)
-from rithmic_bot_vaciodevela.application.services.tick_processor import TickProcessor
-from rithmic_bot_vaciodevela.domain.services.bar_builder import BarBuilder
-from rithmic_bot_vaciodevela.domain.services.big_trade_detector import BigTradeDetector
-from rithmic_bot_vaciodevela.domain.services.big_trade_filter_evaluator import BigTradeFilterEvaluator
-from rithmic_bot_vaciodevela.domain.services.blocked_window_filter_evaluator import (
-    BlockedWindowFilterEvaluator,
-)
-from rithmic_bot_vaciodevela.domain.services.entry_price_calculator import EntryPriceCalculator
-from rithmic_bot_vaciodevela.domain.services.operating_hours import (
-    OperatingHoursConfig,
-    OperatingHoursManager,
-)
-from rithmic_bot_vaciodevela.domain.services.reference_bar_detector import ReferenceBarDetector
-from rithmic_bot_vaciodevela.domain.services.setup_manager import SetupManager
-from rithmic_bot_vaciodevela.domain.services.stop_loss_calculator import StopLossCalculator
-from rithmic_bot_vaciodevela.domain.services.take_profit_calculator import TakeProfitCalculator
-from rithmic_bot_vaciodevela.domain.services.trading_session import TradingSessionManager
-from rithmic_bot_vaciodevela.domain.services.void_detector import VoidDetector
-from rithmic_bot_vaciodevela.domain.services.void_filter_evaluator import VoidFilterEvaluator
-from rithmic_bot_vaciodevela.domain.services.vwap_calculator import VwapCalculator
-from rithmic_bot_vaciodevela.domain.services.vwap_filter_evaluator import VwapFilterEvaluator
-from rithmic_bot_vaciodevela.domain.services.wick_detector import WickDetector
-from rithmic_bot_vaciodevela.domain.services.wick_filter_evaluator import WickFilterEvaluator
-from rithmic_bot_vaciodevela.domain.state.bot_state import BotState
-from rithmic_bot_vaciodevela.infrastructure.config.credentials_loader import load_credentials
-from rithmic_bot_vaciodevela.infrastructure.dashboard.dashboard_renderer import DashboardRenderer
-from rithmic_bot_vaciodevela.infrastructure.dashboard.dashboard_state import DashboardState
-from rithmic_bot_vaciodevela.infrastructure.dashboard.keyboard_listener import KeyboardListener
-from rithmic_bot_vaciodevela.infrastructure.rithmic.maintenance_window import RithmicMaintenanceWindow
-from rithmic_bot_vaciodevela.infrastructure.rithmic.rithmic_connection import create_rithmic_client
-from rithmic_bot_vaciodevela.infrastructure.rithmic.rithmic_tick_mapper import RithmicTickMapper
-from rithmic_bot_vaciodevela.infrastructure.telegram.telegram_client import TelegramClient
-
-
-class RithmicMarketDataRunner:
-    def __init__(self, config, base_dir: Path):
-        self.config = config
-        self.base_dir = base_dir
-        self.credentials = load_credentials(base_dir / "config" / "credentials.yaml")
-
-        self.state = BotState()
-        self.tick_mapper = RithmicTickMapper()
-        self.terminal_notifier = TerminalEventNotifier()
-        self.maintenance_window = RithmicMaintenanceWindow()
-
-        self.dashboard_state = DashboardState()
-        self.dashboard_renderer = DashboardRenderer(
-            big_trade_time_window_seconds=config.strategy.big_trade.time_window_seconds,
-            big_trade_buy_threshold=config.strategy.big_trade.volume_threshold,
-            big_trade_sell_threshold=config.strategy.big_trade.volume_threshold,
-            big_trade_max_lines=100,
-            void_threshold=config.strategy.void_filter.fixed_max_volume,
-            tape_max_lines=120,
-            void_method=config.strategy.void_filter.method,
-            void_percentile=config.strategy.void_filter.percentile,
-            tick_size=config.market.tick_size,
-        )
-
-        self.keyboard_listener = KeyboardListener(self.dashboard_state)
-
-        self.tick_processor = TickProcessor(
-            bar_builder=BarBuilder(bar_minutes=config.bars.minutes),
-            vwap_calculator=VwapCalculator(),
-            trading_session_manager=TradingSessionManager(),
-            operating_hours_manager=OperatingHoursManager(
-                OperatingHoursConfig(
-                    start_time=self._parse_time(config.operating_hours.madrid_start),
-                    end_time=self._parse_time(config.operating_hours.madrid_end),
-                )
-            ),
-        )
-
-        blocked_windows = [
-            (self._parse_time(w.start), self._parse_time(w.end))
-            for w in config.strategy.blocked_windows.windows
-        ]
-
-        self.setup_manager = SetupManager(
-            reference_bar_detector=ReferenceBarDetector(
-                tick_size=config.market.tick_size,
-                total_range_min_ticks=config.strategy.reference_bar.total_range_min_ticks,
-                cvm_body_margin_ticks=config.strategy.reference_bar.cvm_body_margin_ticks,
-                value_area_percent=config.strategy.reference_bar.value_area_percent,
-                volume_required_percent=config.strategy.reference_bar.volume_required_percent,
-            ),
-            entry_price_calculator=EntryPriceCalculator(
-                tick_size=config.market.tick_size,
-                entry_offset_ticks=config.strategy.setup.entry_offset_ticks,
-            ),
-            stop_loss_calculator=StopLossCalculator(
-                tick_size=config.market.tick_size,
-                max_sl_ticks=60,
-            ),
-            take_profit_calculator=TakeProfitCalculator(
-                tick_size=config.market.tick_size,
-                void_ratio=config.strategy.take_profit.void_ratio,
-                tp_min_ticks=config.strategy.take_profit.tp_min_ticks,
-            ),
-            wick_filter_evaluator=WickFilterEvaluator(),
-            vwap_filter_evaluator=VwapFilterEvaluator(
-                tick_size=config.market.tick_size,
-                max_distance_ticks=config.strategy.vwap_filter.max_distance_ticks,
-            ),
-            big_trade_filter_evaluator=BigTradeFilterEvaluator(),
-            void_filter_evaluator=VoidFilterEvaluator(),
-            blocked_window_filter_evaluator=BlockedWindowFilterEvaluator(
-                enabled=config.strategy.blocked_windows.enabled,
-                windows=blocked_windows,
-            ),
-            entry_window_bars=config.strategy.setup.entry_window_bars,
-        )
-
-        telegram_service = None
-        if config.telegram.enabled:
-            telegram_client = TelegramClient(
-                bot_token=config.telegram.bot_token,
-                chat_ids=config.telegram.chat_ids,
-                enabled=config.telegram.enabled,
-            )
-            telegram_service = TelegramService(telegram_client)
-
-        self.closed_bar_orchestrator = LiveClosedBarOrchestrator(
-            setup_manager=self.setup_manager,
-            wick_detector=WickDetector(
-                tick_size=config.market.tick_size,
-                min_wick_ticks=config.strategy.wick_filter.min_wick_ticks,
-                min_remaining_wick_ticks=config.strategy.wick_filter.min_remaining_wick_ticks,
-            ),
-            big_trade_detector=BigTradeDetector(
-                tick_size=config.market.tick_size,
-                zone_max_ticks=config.strategy.big_trade.zone_max_ticks,
-                time_window_seconds=config.strategy.big_trade.time_window_seconds,
-                volume_threshold=config.strategy.big_trade.volume_threshold,
-            ),
-            void_detector=VoidDetector(
-                tick_size=config.market.tick_size,
-                method=config.strategy.void_filter.method,
-                fixed_max_volume=config.strategy.void_filter.fixed_max_volume,
-                percentile=config.strategy.void_filter.percentile,
-                zone_min_ticks=config.strategy.void_filter.zone_min_ticks,
-                zone_max_gap_ticks=config.strategy.void_filter.zone_max_gap_ticks,
-                zone_release_pct=config.strategy.void_filter.zone_release_pct,
-            ),
-            audit_output_dir=base_dir / "data" / "audits_live",
-            closed_bar_csv_enabled=config.debug.closed_bar_csv.enabled,
-            closed_bar_csv_output_dir=base_dir / config.debug.closed_bar_csv.output_dir,
-            telegram_service=telegram_service,
-        )
-
-        self.dashboard_service = DashboardService(
-            bot_name="rithmic_bot_vaciodevela",
-            environment="live",
-        )
-
-    async def run(self) -> None:
-        self.keyboard_listener.start()
-        quick_retry_limit = 5
-
-        while True:
-            now = self.maintenance_window.now_madrid()
-
-            if self.maintenance_window.is_maintenance(now):
-                maintenance_end = self.maintenance_window.maintenance_end(now)
-                countdown = self.maintenance_window.countdown_text(maintenance_end, now)
-
-                self.state.set_connection_state(
-                    status="Esperando apertura de Rithmic",
-                    detail=f"Mantenimiento activo | apertura en {countdown}",
-                    next_retry_at=maintenance_end,
-                    maintenance_until=maintenance_end,
-                )
-
-                await self._render_dashboard_once()
-                await asyncio.sleep(1)
-                continue
-
-            client = None
-
-            try:
-                self.state.set_connection_state(
-                    status="Conectando a Rithmic...",
-                    detail="Intentando conexión",
-                    next_retry_at=None,
-                    maintenance_until=None,
-                )
-                await self._render_dashboard_once()
-
-                client = create_rithmic_client(self.credentials)
-                account_id = self.credentials.accounts[0]
-
-                execution_service = ExecutionService(
-                    client=client,
-                    account_id=account_id,
-                    symbol=self.config.market.symbol,
-                    exchange="CME",
-                    qty=1,
-                )
-                self.closed_bar_orchestrator.set_execution_service(execution_service)
-
-                async def on_rithmic_order_notification(data):
-                    await execution_service.on_rithmic_order_notification(data, self.state)
-
-                async def on_exchange_order_notification(data):
-                    await execution_service.on_exchange_order_notification(
-                        data=data,
-                        state=self.state,
-                        setup=self.state.active_setup,
-                    )
-
-                async def on_tick(data):
-                    mapped = self.tick_mapper.map(data)
-
-                    if mapped.tick is None:
-                        return
-
-                    if not mapped.is_trade_tick:
-                        return
-
-                    result = self.tick_processor.process_tick(self.state, mapped.tick)
-
-                    self._update_simulated_setup_result(self.state, mapped.tick)
-
-                    if result.closed_bar is not None:
-                        self.closed_bar_orchestrator.handle_closed_bar(
-                            state=self.state,
-                            closed_bar=result.closed_bar,
-                            closed_bar_ticks=result.closed_bar_ticks,
-                        )
-
-                try:
-                    client.on_rithmic_order_notification += on_rithmic_order_notification
-                except Exception:
-                    print("⚠️ rithmic_order_notification no disponible")
-
-                try:
-                    client.on_exchange_order_notification += on_exchange_order_notification
-                except Exception:
-                    print("⚠️ exchange_order_notification no disponible")
-
-                client.on_tick += on_tick
-
-                await client.connect()
-
-                self.state.reconnect_attempts = 0
-                self.state.set_connection_state(
-                    status="Conectado a Rithmic",
-                    detail="Feed activo",
-                    next_retry_at=None,
-                    maintenance_until=None,
-                )
-
-                self.terminal_notifier.notify_bot_started(self.config.market.symbol)
-                print(f"ACCOUNTS: {self.credentials.accounts}")
-                print("MODO: SOLO LECTURA")
-
-                if self.config.telegram.enabled:
-                    telegram_client = TelegramClient(
-                        bot_token=self.config.telegram.bot_token,
-                        chat_ids=self.config.telegram.chat_ids,
-                        enabled=self.config.telegram.enabled,
-                    )
-                    try:
-                        telegram_client.send_message("🔌 rithmic_bot_vaciodevela conectado en modo SOLO LECTURA")
-                    except Exception as e:
-                        print(f"ERROR TELEGRAM START: {repr(e)}")
-
-                await client.subscribe_to_market_data(
-                    self.config.market.symbol,
-                    "CME",
-                    DataType.LAST_TRADE | DataType.BBO,
-                )
-
-                while True:
-                    if not self._client_looks_connected(client):
-                        raise ConnectionError("Sin conexión a Rithmic")
-
-                    await self._render_dashboard_once()
-                    await asyncio.sleep(1)
-
-            except Exception as e:
-                self.state.reconnect_attempts += 1
-                print(f"ERROR RUNNER: {repr(e)}")
-
-                if self.state.reconnect_attempts <= quick_retry_limit:
-                    wait_seconds = 5
-                    detail = (
-                        f"Sin conexión a Rithmic | reintento "
-                        f"{self.state.reconnect_attempts}/{quick_retry_limit} en {wait_seconds}s"
-                    )
-                else:
-                    wait_seconds = 300
-                    detail = "Sin conexión a Rithmic | reintento cada 5 minutos"
-
-                self.state.set_connection_state(
-                    status="Sin conexión a Rithmic",
-                    detail=detail,
-                    next_retry_at=None,
-                    maintenance_until=None,
-                )
-
-                try:
-                    if client is not None:
-                        await client.disconnect()
-                except Exception:
-                    pass
-
-                await self._sleep_with_dashboard(wait_seconds)
-
-    def _update_simulated_setup_result(self, state: BotState, tick) -> None:
-        setup = state.active_setup
-
-        if setup is None:
-            return
-
-        if not setup.is_active:
-            return
-
-        if getattr(setup, "sim_resultado", None) is not None:
-            return
-
-        price = float(tick.price)
-        now = tick.timestamp_madrid
-        tick_size = self.config.market.tick_size
-
-        sim_entrada_hecha = getattr(setup, "sim_entrada_hecha", False)
-
-        if not sim_entrada_hecha:
-            if setup.direction == "LONG":
-                if price >= setup.entry_price:
-                    setattr(setup, "sim_entrada_hecha", True)
-                    setattr(setup, "sim_hora_entrada", now)
-                    setattr(setup, "sim_precio_entrada", setup.entry_price)
-
-                    self._persist_simulated_result_to_excel(
-                        state=state,
-                        hora_entrada=now,
-                        precio_entrada=setup.entry_price,
-                        resultado=None,
-                        hora_resultado=None,
-                        precio_resultado=None,
-                        ticks_resultado=None,
-                    )
-
-            elif setup.direction == "SHORT":
-                if price <= setup.entry_price:
-                    setattr(setup, "sim_entrada_hecha", True)
-                    setattr(setup, "sim_hora_entrada", now)
-                    setattr(setup, "sim_precio_entrada", setup.entry_price)
-
-                    self._persist_simulated_result_to_excel(
-                        state=state,
-                        hora_entrada=now,
-                        precio_entrada=setup.entry_price,
-                        resultado=None,
-                        hora_resultado=None,
-                        precio_resultado=None,
-                        ticks_resultado=None,
-                    )
-
-            return
-
-        if setup.direction == "LONG":
-            if price <= setup.stop_loss_price:
-                resultado = "SL"
-                precio_resultado = setup.stop_loss_price
-                ticks_resultado = (precio_resultado - setup.entry_price) / tick_size
-
-            elif price >= setup.take_profit_price:
-                resultado = "TP"
-                precio_resultado = setup.take_profit_price
-                ticks_resultado = (precio_resultado - setup.entry_price) / tick_size
-
-            else:
-                return
-
-        elif setup.direction == "SHORT":
-            if price >= setup.stop_loss_price:
-                resultado = "SL"
-                precio_resultado = setup.stop_loss_price
-                ticks_resultado = (setup.entry_price - precio_resultado) / tick_size
-
-            elif price <= setup.take_profit_price:
-                resultado = "TP"
-                precio_resultado = setup.take_profit_price
-                ticks_resultado = (setup.entry_price - precio_resultado) / tick_size
-
-            else:
-                return
-
-        else:
-            return
-
-        setattr(setup, "sim_resultado", resultado)
-        setattr(setup, "sim_hora_resultado", now)
-        setattr(setup, "sim_precio_resultado", precio_resultado)
-        setattr(setup, "sim_ticks_resultado", ticks_resultado)
-
-        self._persist_simulated_result_to_excel(
-            state=state,
-            hora_entrada=getattr(setup, "sim_hora_entrada", None),
-            precio_entrada=getattr(setup, "sim_precio_entrada", None),
-            resultado=resultado,
-            hora_resultado=now,
-            precio_resultado=precio_resultado,
-            ticks_resultado=ticks_resultado,
-        )
-
-    def _persist_simulated_result_to_excel(
-        self,
-        state: BotState,
-        hora_entrada,
-        precio_entrada,
-        resultado,
-        hora_resultado,
-        precio_resultado,
-        ticks_resultado,
-    ) -> None:
-        if not self.config.debug.closed_bar_csv.enabled:
-            return
-
-        if not hasattr(self.closed_bar_orchestrator.closed_bar_csv_service, "update_execution_result"):
-            return
-
-        session_date = getattr(state, "active_setup_session_date", None)
-
-        bar_start = self._format_excel_datetime(
-            getattr(state, "active_setup_bar_start", None)
-        )
-        bar_end = self._format_excel_datetime(
-            getattr(state, "active_setup_bar_end", None)
-        )
-
-        if not session_date or not bar_start or not bar_end:
-            return
-
-        self.closed_bar_orchestrator.closed_bar_csv_service.update_execution_result(
-            session_date=session_date,
-            bar_start=bar_start,
-            bar_end=bar_end,
-            hora_entrada=hora_entrada,
-            precio_entrada_real=precio_entrada,
-            resultado_setup=resultado,
-            hora_resultado=hora_resultado,
-            precio_resultado=precio_resultado,
-            ticks_resultado=ticks_resultado,
-        )
-
-    def _format_excel_datetime(self, value):
-        if value is None:
-            return None
-
-        if isinstance(value, str):
-            return value.strip()
 
+st.markdown("#### 🐟 Precios Pescados Pardo")
+
+st.markdown("""
+<style>
+.stApp {
+    background-color: #40E0D0;
+    color: black;
+}
+
+div, p, span, label, h1, h2, h3, h4, h5, h6 {
+    color: black !important;
+}
+
+input {
+    background-color: white !important;
+    color: black !important;
+    border: 2px solid #00A86B !important;
+}
+
+textarea {
+    background-color: white !important;
+    color: black !important;
+    border: 2px solid #00A86B !important;
+}
+
+div[data-baseweb="input"] {
+    background-color: white !important;
+    border-radius: 6px;
+}
+
+div[data-baseweb="input"]:focus-within {
+    border: 2px solid #00A86B !important;
+    box-shadow: 0 0 0 1px #00A86B !important;
+}
+
+input[type="number"] {
+    background-color: white !important;
+    color: black !important;
+}
+
+.stButton button {
+    background-color: white !important;
+    color: black !important;
+    border: 1px solid black !important;
+    padding: 0.35rem 0.6rem;
+    font-size: 0.90rem;
+    min-height: 2.4rem;
+}
+
+a[data-testid="stBaseButton-secondary"] {
+    background-color: white !important;
+    color: black !important;
+    border: 1px solid black !important;
+}
+
+.block-container {
+    padding-top: 0.6rem;
+    padding-bottom: 0.8rem;
+}
+
+div[data-testid="stVerticalBlock"] {
+    gap: 0.45rem;
+}
+
+hr {
+    margin: 0.75rem 0;
+    border-color: black;
+}
+
+.producto {
+    font-size: 0.90rem;
+    line-height: 1.35;
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.35rem;
+    display: block;
+    color: black;
+}
+
+.producto b {
+    font-weight: 800;
+    color: black;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+TARIFAS = {
+    "1": "PRECIO",
+    "2": "CLIENTE FINAL",
+    "3": "ALTA DISTRIBUCION",
+    "4": "HOSTELERIA",
+}
+
+NOMBRES_TARIFAS = {
+    "1": "Coste",
+    "2": "Cliente final",
+    "3": "Alta distribución",
+    "4": "Pescadería/Hostelería",
+}
+
+
+def get_secret(nombre, defecto=""):
+    try:
+        return st.secrets.get(nombre, defecto)
+    except Exception:
+        return defecto
+
+
+GITHUB_TOKEN = get_secret("GITHUB_TOKEN")
+GITHUB_REPO = get_secret("GITHUB_REPO")
+GITHUB_BRANCH = get_secret("GITHUB_BRANCH", "main")
+FAVORITOS_PATH = get_secret("FAVORITOS_PATH", "favoritos.json")
+PEDIDOS_PATH = get_secret("PEDIDOS_PATH", "pedidos.json")
+
+
+def buscar_excel_tarifa():
+    archivos = list(Path(".").glob("*.xlsx")) + list(Path(".").glob("*.xls"))
+    archivos = [a for a in archivos if a.name.lower() not in ["clientes.xlsx"]]
+    return archivos[0] if archivos else None
+
+
+def buscar_excel_clientes():
+    archivo = Path("clientes.xlsx")
+    return archivo if archivo.exists() else None
+
+
+def limpiar_precio(valor):
+    if pd.isna(valor):
+        return None
+
+    if isinstance(valor, (int, float)):
+        return float(valor)
+
+    texto = str(valor).strip().replace("€", "").replace(" ", "")
+
+    if "," in texto and "." not in texto:
+        texto = texto.replace(",", ".")
+    elif "," in texto and "." in texto:
+        texto = texto.replace(".", "").replace(",", ".")
+
+    try:
+        return float(texto)
+    except Exception:
+        return None
+
+
+def euros(valor):
+    return f"{float(valor):.2f}".replace(".", ",")
+
+
+def github_headers():
+    return {
+        "Authorization": f"Bearer {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github+json",
+    }
+
+
+def github_url(path):
+    return f"https://api.github.com/repos/{GITHUB_REPO}/contents/{path}"
+
+
+def cargar_json_github(path):
+    if GITHUB_TOKEN and GITHUB_REPO:
         try:
-            return value.strftime("%Y-%m-%d %H:%M:%S")
+            r = requests.get(
+                github_url(path),
+                headers=github_headers(),
+                params={"ref": GITHUB_BRANCH},
+                timeout=15
+            )
+
+            if r.status_code == 200:
+                data = r.json()
+                contenido = base64.b64decode(data["content"]).decode("utf-8")
+                return json.loads(contenido or "{}"), data.get("sha")
+
         except Exception:
-            return str(value).strip()
+            pass
 
-    async def _sleep_with_dashboard(self, seconds: int) -> None:
-        for remaining in range(seconds, 0, -1):
-            if self.state.connection_status == "Sin conexión a Rithmic":
-                if self.state.reconnect_attempts <= 5:
-                    self.state.connection_detail = (
-                        f"Sin conexión a Rithmic | reintento "
-                        f"{self.state.reconnect_attempts}/5 en {remaining}s"
-                    )
-                else:
-                    minutes = remaining // 60
-                    secs = remaining % 60
-                    self.state.connection_detail = (
-                        f"Sin conexión a Rithmic | próximo intento en {minutes:02d}:{secs:02d}"
-                    )
+    archivo_local = Path(path)
 
-            await self._render_dashboard_once()
-            await asyncio.sleep(1)
-
-    async def _render_dashboard_once(self) -> None:
+    if archivo_local.exists():
         try:
-            self.dashboard_renderer.render(
-                state=self.state,
-                dashboard_state=self.dashboard_state,
-                symbol=self.config.market.symbol,
-                accounts=self.credentials.accounts,
+            return json.loads(archivo_local.read_text(encoding="utf-8") or "{}"), None
+        except Exception:
+            return {}, None
+
+    return {}, None
+
+
+def guardar_json_github(path, datos, sha_actual=None, mensaje="Actualizar datos"):
+    contenido_json = json.dumps(datos, ensure_ascii=False, indent=2)
+
+    if GITHUB_TOKEN and GITHUB_REPO:
+        try:
+            payload = {
+                "message": mensaje,
+                "content": base64.b64encode(contenido_json.encode("utf-8")).decode("utf-8"),
+                "branch": GITHUB_BRANCH,
+            }
+
+            if sha_actual:
+                payload["sha"] = sha_actual
+
+            r = requests.put(
+                github_url(path),
+                headers=github_headers(),
+                json=payload,
+                timeout=15
             )
-        except Exception as e:
-            print(f"ERROR DASHBOARD: {repr(e)}")
 
-    def _client_looks_connected(self, client) -> bool:
-        try:
-            if hasattr(client, "is_connected"):
-                attr = getattr(client, "is_connected")
-                if callable(attr):
-                    return bool(attr())
-                return bool(attr)
+            return r.status_code in [200, 201]
 
-            if hasattr(client, "connected"):
-                attr = getattr(client, "connected")
-                if callable(attr):
-                    return bool(attr)
-
-            ws = getattr(client, "ws", None)
-            if ws is not None and hasattr(ws, "closed"):
-                return not ws.closed
         except Exception:
             return False
 
+    try:
+        Path(path).write_text(contenido_json, encoding="utf-8")
         return True
+    except Exception:
+        return False
 
-    def _parse_time(self, value: str) -> time:
-        hh, mm = value.split(":")
-        return time(int(hh), int(mm))
+
+def cargar_favoritos():
+    return cargar_json_github(FAVORITOS_PATH)
+
+
+def cargar_pedidos():
+    return cargar_json_github(PEDIDOS_PATH)
+
+
+def registrar_favorito(n_cliente, codigo, cajas):
+    favoritos, sha = cargar_favoritos()
+
+    n_cliente = str(n_cliente)
+    codigo = str(codigo)
+
+    if n_cliente not in favoritos:
+        favoritos[n_cliente] = {}
+
+    if codigo not in favoritos[n_cliente]:
+        favoritos[n_cliente][codigo] = 0
+
+    favoritos[n_cliente][codigo] += int(cajas)
+
+    guardar_json_github(
+        FAVORITOS_PATH,
+        favoritos,
+        sha,
+        "Actualizar favoritos"
+    )
+
+
+def productos_favoritos(df, n_cliente):
+    favoritos, _ = cargar_favoritos()
+    datos_cliente = favoritos.get(str(n_cliente), {})
+
+    if not datos_cliente:
+        return pd.DataFrame()
+
+    codigos_ordenados = sorted(
+        datos_cliente.keys(),
+        key=lambda c: datos_cliente[c],
+        reverse=True
+    )
+
+    df_fav = df[df["CODIGO"].astype(str).isin(codigos_ordenados)].copy()
+
+    if df_fav.empty:
+        return df_fav
+
+    df_fav["ORDEN_FAVORITO"] = df_fav["CODIGO"].astype(str).map(
+        {codigo: i for i, codigo in enumerate(codigos_ordenados)}
+    )
+
+    return df_fav.sort_values("ORDEN_FAVORITO").drop(columns=["ORDEN_FAVORITO"])
+
+
+def cargar_clientes():
+    archivo = buscar_excel_clientes()
+
+    if archivo is None:
+        st.error("No encuentro clientes.xlsx")
+        st.stop()
+
+    clientes = pd.read_excel(archivo)
+    clientes.columns = clientes.columns.astype(str).str.strip().str.upper()
+
+    columnas = ["N_CLIENTE", "CLIENTE", "CONTRASEÑA", "TARIFA"]
+    faltan = [c for c in columnas if c not in clientes.columns]
+
+    if faltan:
+        st.error(f"Faltan columnas en clientes.xlsx: {faltan}")
+        st.write("Columnas encontradas:", list(clientes.columns))
+        st.stop()
+
+    clientes["N_CLIENTE"] = clientes["N_CLIENTE"].astype(str).str.strip()
+    clientes["CONTRASEÑA"] = clientes["CONTRASEÑA"].astype(str).str.strip()
+    clientes["TARIFA"] = clientes["TARIFA"].astype(str).str.strip().str.upper()
+
+    return clientes
+
+
+def cargar_tarifa():
+    archivo = buscar_excel_tarifa()
+
+    if archivo is None:
+        st.error("No encuentro ningún Excel de tarifa")
+        st.stop()
+
+    df = pd.read_excel(archivo)
+    df.columns = df.columns.astype(str).str.strip().str.upper()
+
+    columnas = ["CODIGO", "DESCRIPCION", "FORMATO", "PRECIO"]
+    faltan = [c for c in columnas if c not in df.columns]
+
+    if faltan:
+        st.error(f"Faltan columnas en el Excel de tarifa: {faltan}")
+        st.write("Columnas encontradas:", list(df.columns))
+        st.stop()
+
+    df["CODIGO"] = df["CODIGO"].astype(str).str.strip()
+    df["PRECIO"] = df["PRECIO"].apply(limpiar_precio)
+    df = df.dropna(subset=["PRECIO"])
+
+    df["CLIENTE FINAL"] = df["PRECIO"] / 0.55
+    df["ALTA DISTRIBUCION"] = df["PRECIO"] / 0.90
+    df["HOSTELERIA"] = df["PRECIO"] / 0.80
+
+    for col in ["PRECIO", "CLIENTE FINAL", "ALTA DISTRIBUCION", "HOSTELERIA"]:
+        df[col] = df[col].round(2)
+
+    return df
+
+
+def crear_texto_pedido(cliente, pedido):
+    lineas = ["PEDIDO", f"Cliente: {cliente}", ""]
+    total_cajas = 0
+
+    for item in pedido:
+        total_cajas += int(item["cajas"])
+        lineas.append(
+            f"- {item['cajas']} cajas | {item['descripcion']} | "
+            f"{euros(item['precio'])} € | {item['formato']}"
+        )
+
+    lineas.append("")
+    lineas.append(f"Total cajas: {total_cajas}")
+    return "\n".join(lineas)
+
+
+def agregar_al_pedido(item_nuevo):
+    for item in st.session_state.pedido:
+        mismo_codigo = str(item.get("codigo")) == str(item_nuevo.get("codigo"))
+        misma_tarifa = str(item.get("tarifa")) == str(item_nuevo.get("tarifa"))
+
+        if mismo_codigo and misma_tarifa:
+            item["cajas"] = int(item["cajas"]) + int(item_nuevo["cajas"])
+            return
+
+    st.session_state.pedido.append(item_nuevo)
+
+
+def guardar_pedido_historico():
+    pedidos, sha = cargar_pedidos()
+    n_cliente = str(st.session_state.n_cliente)
+
+    if n_cliente not in pedidos:
+        pedidos[n_cliente] = []
+
+    nuevo_pedido = {
+        "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "cliente": st.session_state.cliente,
+        "n_cliente": st.session_state.n_cliente,
+        "productos": st.session_state.pedido,
+    }
+
+    pedidos[n_cliente].append(nuevo_pedido)
+
+    guardar_json_github(
+        PEDIDOS_PATH,
+        pedidos,
+        sha,
+        "Actualizar pedidos"
+    )
+
+
+def obtener_ultimo_pedido(n_cliente):
+    pedidos, _ = cargar_pedidos()
+    lista = pedidos.get(str(n_cliente), [])
+
+    if not lista:
+        return None
+
+    return lista[-1]
+
+
+def obtener_historico_cliente(n_cliente):
+    pedidos, _ = cargar_pedidos()
+    return pedidos.get(str(n_cliente), [])
+
+
+def recalcular_pedido_con_tarifa_actual(pedido, df, tarifa_visible):
+    col_precio = TARIFAS[tarifa_visible]
+    pedido_recalculado = []
+
+    for item in pedido:
+        codigo = str(item.get("codigo"))
+        fila = df[df["CODIGO"].astype(str) == codigo]
+
+        if fila.empty:
+            continue
+
+        fila = fila.iloc[0]
+
+        pedido_recalculado.append({
+            "cajas": int(item.get("cajas", 1)),
+            "codigo": str(fila["CODIGO"]),
+            "descripcion": str(fila["DESCRIPCION"]),
+            "precio": float(fila[col_precio]),
+            "formato": str(fila["FORMATO"]),
+            "tarifa": tarifa_visible,
+        })
+
+    return pedido_recalculado
+
+
+if "logueado" not in st.session_state:
+    st.session_state.logueado = False
+
+if "pedido" not in st.session_state:
+    st.session_state.pedido = []
+
+if "cliente" not in st.session_state:
+    st.session_state.cliente = ""
+
+if "n_cliente" not in st.session_state:
+    st.session_state.n_cliente = ""
+
+if "tarifa_cliente" not in st.session_state:
+    st.session_state.tarifa_cliente = ""
+
+if "productos_anadidos" not in st.session_state:
+    st.session_state.productos_anadidos = set()
+
+
+if not st.session_state.logueado:
+    st.markdown("### Acceso cliente")
+
+    n_cliente = st.text_input("Nº cliente", value=st.session_state.get("n_cliente_login", ""))
+    password = st.text_input("Contraseña", type="password")
+
+    if st.button("Entrar"):
+        clientes = cargar_clientes()
+
+        usuario = clientes[
+            (clientes["N_CLIENTE"] == str(n_cliente).strip()) &
+            (clientes["CONTRASEÑA"] == str(password).strip())
+        ]
+
+        if usuario.empty:
+            st.error("Nº cliente o contraseña incorrectos.")
+        else:
+            usuario = usuario.iloc[0]
+
+            st.session_state.logueado = True
+            st.session_state.n_cliente = str(usuario["N_CLIENTE"])
+            st.session_state.n_cliente_login = str(usuario["N_CLIENTE"])
+            st.session_state.cliente = str(usuario["CLIENTE"])
+            st.session_state.tarifa_cliente = str(usuario["TARIFA"]).upper()
+            st.session_state.pedido = []
+            st.session_state.productos_anadidos = set()
+
+            st.rerun()
+
+    st.stop()
+
+
+df = cargar_tarifa()
+
+st.success(f"Cliente: {st.session_state.cliente}")
+
+if st.button("Cerrar sesión"):
+    st.session_state.logueado = False
+    st.session_state.pedido = []
+    st.session_state.cliente = ""
+    st.session_state.n_cliente = ""
+    st.session_state.tarifa_cliente = ""
+    st.session_state.productos_anadidos = set()
+    st.rerun()
+
+
+tarifa_cliente = st.session_state.tarifa_cliente
+
+if tarifa_cliente == "TODAS":
+    tarifa_visible = st.radio(
+        "Tarifa",
+        ["1", "2", "3", "4"],
+        horizontal=True,
+        format_func=lambda x: f"Tarifa {x} - {NOMBRES_TARIFAS[x]}"
+    )
+else:
+    tarifa_visible = tarifa_cliente
+    st.info(f"Tarifa {tarifa_visible} - {NOMBRES_TARIFAS.get(tarifa_visible, '')}")
+
+if tarifa_visible not in TARIFAS:
+    st.error("La tarifa asignada no es válida. Usa 1, 2, 3, 4 o TODAS en clientes.xlsx.")
+    st.stop()
+
+col_precio = TARIFAS[tarifa_visible]
+
+
+st.markdown("### 🧾 Pedido")
+
+ultimo_pedido = obtener_ultimo_pedido(st.session_state.n_cliente)
+
+if ultimo_pedido and not st.session_state.pedido:
+    fecha_ultimo = ultimo_pedido.get("fecha", "")
+    st.info(f"Último pedido disponible: {fecha_ultimo}")
+
+    if st.button("Repetir último pedido"):
+        st.session_state.pedido = recalcular_pedido_con_tarifa_actual(
+            ultimo_pedido.get("productos", []),
+            df,
+            tarifa_visible
+        )
+
+        st.session_state.productos_anadidos = {
+            f"{item['codigo']}_{item['tarifa']}"
+            for item in st.session_state.pedido
+        }
+
+        st.rerun()
+
+
+historico_cliente = obtener_historico_cliente(st.session_state.n_cliente)
+
+if historico_cliente:
+    with st.expander("Ver histórico de pedidos", expanded=False):
+        for pedido_hist in reversed(historico_cliente[-5:]):
+            st.markdown(f"**{pedido_hist.get('fecha', '')}**")
+            productos_hist = pedido_hist.get("productos", [])
+
+            for item in productos_hist:
+                st.write(
+                    f"{item.get('cajas')} cajas | "
+                    f"{item.get('descripcion')} | "
+                    f"{euros(item.get('precio', 0))} € | "
+                    f"{item.get('formato')}"
+                )
+
+            st.markdown("---")
+
+
+if st.session_state.pedido:
+    total = sum(int(item["cajas"]) for item in st.session_state.pedido)
+
+    st.success(
+        f"{len(st.session_state.pedido)} productos | "
+        f"{total} cajas"
+    )
+
+    with st.expander("Ver / modificar pedido", expanded=False):
+        for idx, item in enumerate(st.session_state.pedido):
+            st.markdown(
+                f"**{item['descripcion']}**  \n"
+                f"{euros(item['precio'])} € · {item['formato']}"
+            )
+
+            col1, col2, col3 = st.columns([1, 1, 1])
+
+            with col1:
+                nueva_cantidad = st.number_input(
+                    "Cajas",
+                    min_value=1,
+                    value=int(item["cajas"]),
+                    step=1,
+                    key=f"edit_cajas_{idx}",
+                    label_visibility="collapsed"
+                )
+                st.session_state.pedido[idx]["cajas"] = int(nueva_cantidad)
+
+            with col2:
+                if st.button("Quitar", key=f"quitar_{idx}"):
+                    boton_id_quitar = f"{item.get('codigo')}_{item.get('tarifa')}"
+                    if boton_id_quitar in st.session_state.productos_anadidos:
+                        st.session_state.productos_anadidos.remove(boton_id_quitar)
+
+                    st.session_state.pedido.pop(idx)
+                    st.rerun()
+
+            with col3:
+                st.write(f"{int(st.session_state.pedido[idx]['cajas'])} cajas")
+
+            st.markdown("---")
+
+    texto = crear_texto_pedido(st.session_state.cliente, st.session_state.pedido)
+    url = "https://wa.me/?text=" + quote(texto)
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.link_button("Finalizar pedido", url)
+
+    with col2:
+        if st.button("Guardar pedido"):
+            guardar_pedido_historico()
+            st.success("Pedido guardado en histórico")
+
+    if st.button("Vaciar pedido"):
+        st.session_state.pedido = []
+        st.session_state.productos_anadidos = set()
+        st.rerun()
+else:
+    st.info("Pedido vacío")
+
+
+busqueda = st.text_input("Buscar", placeholder="Ej: anilla, atún, calamar...")
+
+if busqueda:
+    resultados = df[
+        df["DESCRIPCION"].astype(str).str.contains(busqueda, case=False, na=False)
+    ].reset_index(drop=True)
+else:
+    favoritos_df = productos_favoritos(df, st.session_state.n_cliente)
+
+    if not favoritos_df.empty:
+        st.caption("Productos habituales")
+        resultados = favoritos_df.head(30).reset_index(drop=True)
+    else:
+        st.caption("Mostrando primeros 30 productos. Usa el buscador para filtrar.")
+        resultados = df.head(30).reset_index(drop=True)
+
+
+if resultados.empty:
+    st.warning("No se encontró ningún producto")
+else:
+    for i, fila in resultados.iterrows():
+        codigo = str(fila["CODIGO"])
+        descripcion = str(fila["DESCRIPCION"])
+        formato = str(fila["FORMATO"])
+        precio = float(fila[col_precio])
+
+        key = f"cajas_{i}_{codigo}_{tarifa_visible}_{busqueda}"
+
+        if key not in st.session_state:
+            st.session_state[key] = 1
+
+        st.markdown(
+            f"""
+            <div class="producto">
+                <b>{descripcion}</b> · {euros(precio)} € · {formato}
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        col1, col2 = st.columns([1, 1])
+
+        with col1:
+            cajas = st.number_input(
+                "Cajas",
+                min_value=1,
+                value=st.session_state[key],
+                step=1,
+                key=key,
+                label_visibility="collapsed"
+            )
+
+        with col2:
+            boton_id = f"{codigo}_{tarifa_visible}"
+            texto_boton = "✅ Añadido" if boton_id in st.session_state.productos_anadidos else "Añadir"
+
+            if st.button(texto_boton, key=f"add_{i}_{codigo}_{tarifa_visible}_{busqueda}"):
+                agregar_al_pedido({
+                    "cajas": int(cajas),
+                    "codigo": codigo,
+                    "descripcion": descripcion,
+                    "precio": precio,
+                    "formato": formato,
+                    "tarifa": tarifa_visible,
+                })
+
+                registrar_favorito(
+                    st.session_state.n_cliente,
+                    codigo,
+                    int(cajas)
+                )
+
+                st.session_state.productos_anadidos.add(boton_id)
+                st.rerun()
+
+        st.markdown("---")
