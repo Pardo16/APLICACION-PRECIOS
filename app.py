@@ -28,7 +28,7 @@ def mostrar_logo():
 
             st.markdown(
                 f"""
-                <div style="text-align:center; margin-top:25px; margin-bottom:20px;">
+                <div style="text-align:center; margin-top:45px; margin-bottom:25px;">
                     <img src="data:image/{mime};base64,{img_base64}"
                          style="max-width:220px; width:70%; height:auto;">
                 </div>
@@ -139,9 +139,9 @@ hr {
 }
 
 .footer-finalizar button {
-    background: white;
-    color: black;
-    border: 2px solid black;
+    background: #16a34a !important;
+    color: white !important;
+    border: 2px solid #16a34a !important;
     padding: 12px 24px;
     font-size: 16px;
     font-weight: 700;
@@ -164,6 +164,13 @@ NOMBRES_TARIFAS = {
     "3": "Alta distribución",
     "4": "Pescadería/Hostelería",
 }
+
+
+def redondear_005(valor):
+    try:
+        return round(float(valor) * 20) / 20
+    except Exception:
+        return valor
 
 
 def get_secret(nombre, defecto=""):
@@ -216,6 +223,7 @@ def limpiar_precio(valor):
 
 
 def euros(valor):
+    valor = redondear_005(valor)
     return f"{float(valor):.2f}".replace(".", ",")
 
 
@@ -418,7 +426,7 @@ def cargar_tarifa():
     df["HOSTELERIA"] = df["PRECIO"] / 0.80
 
     for col in ["PRECIO", "CLIENTE FINAL", "ALTA DISTRIBUCION", "HOSTELERIA"]:
-        df[col] = df[col].round(2)
+        df[col] = df[col].apply(redondear_005)
 
     return df
 
@@ -591,7 +599,6 @@ if tarifa_cliente == "TODAS":
     )
 else:
     tarifa_visible = tarifa_cliente
-    st.info(f"Tarifa {tarifa_visible} - {NOMBRES_TARIFAS.get(tarifa_visible, '')}")
 
 if tarifa_visible not in TARIFAS:
     st.error("La tarifa asignada no es válida. Usa 1, 2, 3, 4 o TODAS en clientes.xlsx.")
@@ -678,7 +685,7 @@ historico_cliente = obtener_historico_cliente(st.session_state.n_cliente)
 if historico_cliente:
     with st.expander("Ver histórico de pedidos", expanded=False):
         for pedido_hist in reversed(historico_cliente[-5:]):
-            st.markdown(f"**{pedido_hist.get('fecha', '')}")
+            st.markdown(f"**{pedido_hist.get('fecha', '')}**")
             productos_hist = pedido_hist.get("productos", [])
 
             for item in productos_hist:
