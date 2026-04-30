@@ -10,17 +10,31 @@ import streamlit as st
 
 
 st.set_page_config(
-    page_title="Precios Pescados Pardo",
+    page_title="Tarifa Pescados Pardo",
     page_icon="🐟",
     layout="centered"
 )
 
-st.markdown("#### 🐟 Precios Pescados Pardo")
+# =========================
+# LOGO + TÍTULO
+# =========================
+
+try:
+    st.image("logo.jpg", width=180)
+except Exception:
+    pass
+
+st.markdown("### Tarifa Pescados Pardo")
+
+
+# =========================
+# ESTILO BLANCO / NEGRO
+# =========================
 
 st.markdown("""
 <style>
 .stApp {
-    background-color: #40E0D0;
+    background-color: white;
     color: black;
 }
 
@@ -31,13 +45,13 @@ div, p, span, label, h1, h2, h3, h4, h5, h6 {
 input {
     background-color: white !important;
     color: black !important;
-    border: 2px solid #00A86B !important;
+    border: 1px solid black !important;
 }
 
 textarea {
     background-color: white !important;
     color: black !important;
-    border: 2px solid #00A86B !important;
+    border: 1px solid black !important;
 }
 
 div[data-baseweb="input"] {
@@ -46,8 +60,8 @@ div[data-baseweb="input"] {
 }
 
 div[data-baseweb="input"]:focus-within {
-    border: 2px solid #00A86B !important;
-    box-shadow: 0 0 0 1px #00A86B !important;
+    border: 2px solid black !important;
+    box-shadow: 0 0 0 1px black !important;
 }
 
 input[type="number"] {
@@ -72,7 +86,7 @@ a[data-testid="stBaseButton-secondary"] {
 
 .block-container {
     padding-top: 0.6rem;
-    padding-bottom: 0.8rem;
+    padding-bottom: 5rem;
 }
 
 div[data-testid="stVerticalBlock"] {
@@ -97,9 +111,39 @@ hr {
     font-weight: 800;
     color: black;
 }
+
+.footer-finalizar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    background: white;
+    border-top: 2px solid black;
+    padding: 10px;
+    text-align: center;
+    z-index: 9999;
+}
+
+.footer-finalizar a {
+    text-decoration: none !important;
+}
+
+.footer-finalizar button {
+    background: white;
+    color: black;
+    border: 2px solid black;
+    padding: 12px 24px;
+    font-size: 16px;
+    font-weight: 700;
+    border-radius: 8px;
+}
 </style>
 """, unsafe_allow_html=True)
 
+
+# =========================
+# TARIFAS
+# =========================
 
 TARIFAS = {
     "1": "PRECIO",
@@ -116,6 +160,10 @@ NOMBRES_TARIFAS = {
 }
 
 
+# =========================
+# SECRETS GITHUB
+# =========================
+
 def get_secret(nombre, defecto=""):
     try:
         return st.secrets.get(nombre, defecto)
@@ -130,9 +178,16 @@ FAVORITOS_PATH = get_secret("FAVORITOS_PATH", "favoritos.json")
 PEDIDOS_PATH = get_secret("PEDIDOS_PATH", "pedidos.json")
 
 
+# =========================
+# FUNCIONES BASE
+# =========================
+
 def buscar_excel_tarifa():
     archivos = list(Path(".").glob("*.xlsx")) + list(Path(".").glob("*.xls"))
-    archivos = [a for a in archivos if a.name.lower() not in ["clientes.xlsx"]]
+    archivos = [
+        a for a in archivos
+        if a.name.lower() not in ["clientes.xlsx"]
+    ]
     return archivos[0] if archivos else None
 
 
@@ -148,7 +203,8 @@ def limpiar_precio(valor):
     if isinstance(valor, (int, float)):
         return float(valor)
 
-    texto = str(valor).strip().replace("€", "").replace(" ", "")
+    texto = str(valor).strip()
+    texto = texto.replace("€", "").replace(" ", "")
 
     if "," in texto and "." not in texto:
         texto = texto.replace(",", ".")
@@ -164,6 +220,27 @@ def limpiar_precio(valor):
 def euros(valor):
     return f"{float(valor):.2f}".replace(".", ",")
 
+
+def crear_texto_pedido(cliente, pedido):
+    lineas = ["PEDIDO", f"Cliente: {cliente}", ""]
+    total_cajas = 0
+
+    for item in pedido:
+        total_cajas += int(item["cajas"])
+        lineas.append(
+            f"- {item['cajas']} cajas | {item['descripcion']} | "
+            f"{euros(item['precio'])} € | {item['formato']}"
+        )
+
+    lineas.append("")
+    lineas.append(f"Total cajas: {total_cajas}")
+
+    return "\n".join(lineas)
+
+
+# =========================
+# GITHUB JSON
+# =========================
 
 def github_headers():
     return {
@@ -212,7 +289,9 @@ def guardar_json_github(path, datos, sha_actual=None, mensaje="Actualizar datos"
         try:
             payload = {
                 "message": mensaje,
-                "content": base64.b64encode(contenido_json.encode("utf-8")).decode("utf-8"),
+                "content": base64.b64encode(
+                    contenido_json.encode("utf-8")
+                ).decode("utf-8"),
                 "branch": GITHUB_BRANCH,
             }
 
@@ -293,6 +372,10 @@ def productos_favoritos(df, n_cliente):
     return df_fav.sort_values("ORDEN_FAVORITO").drop(columns=["ORDEN_FAVORITO"])
 
 
+# =========================
+# CARGA EXCEL
+# =========================
+
 def cargar_clientes():
     archivo = buscar_excel_clientes()
 
@@ -350,21 +433,9 @@ def cargar_tarifa():
     return df
 
 
-def crear_texto_pedido(cliente, pedido):
-    lineas = ["PEDIDO", f"Cliente: {cliente}", ""]
-    total_cajas = 0
-
-    for item in pedido:
-        total_cajas += int(item["cajas"])
-        lineas.append(
-            f"- {item['cajas']} cajas | {item['descripcion']} | "
-            f"{euros(item['precio'])} € | {item['formato']}"
-        )
-
-    lineas.append("")
-    lineas.append(f"Total cajas: {total_cajas}")
-    return "\n".join(lineas)
-
+# =========================
+# PEDIDOS
+# =========================
 
 def agregar_al_pedido(item_nuevo):
     for item in st.session_state.pedido:
@@ -442,6 +513,10 @@ def recalcular_pedido_con_tarifa_actual(pedido, df, tarifa_visible):
     return pedido_recalculado
 
 
+# =========================
+# ESTADO
+# =========================
+
 if "logueado" not in st.session_state:
     st.session_state.logueado = False
 
@@ -461,10 +536,18 @@ if "productos_anadidos" not in st.session_state:
     st.session_state.productos_anadidos = set()
 
 
-if not st.session_state.logueado:
-    st.markdown("### Acceso cliente")
+# =========================
+# LOGIN
+# =========================
 
-    n_cliente = st.text_input("Nº cliente", value=st.session_state.get("n_cliente_login", ""))
+if not st.session_state.logueado:
+    st.markdown("### Tarifa Pescados Pardo")
+
+    n_cliente = st.text_input(
+        "Nº cliente",
+        value=st.session_state.get("n_cliente_login", "")
+    )
+
     password = st.text_input("Contraseña", type="password")
 
     if st.button("Entrar"):
@@ -493,6 +576,10 @@ if not st.session_state.logueado:
     st.stop()
 
 
+# =========================
+# APP
+# =========================
+
 df = cargar_tarifa()
 
 st.success(f"Cliente: {st.session_state.cliente}")
@@ -506,6 +593,10 @@ if st.button("Cerrar sesión"):
     st.session_state.productos_anadidos = set()
     st.rerun()
 
+
+# =========================
+# TARIFA
+# =========================
 
 tarifa_cliente = st.session_state.tarifa_cliente
 
@@ -526,6 +617,69 @@ if tarifa_visible not in TARIFAS:
 
 col_precio = TARIFAS[tarifa_visible]
 
+
+# =========================
+# SIDEBAR CARRITO
+# =========================
+
+st.sidebar.markdown("## 🧾 Pedido")
+
+if st.session_state.pedido:
+    total_cajas_sidebar = sum(int(item["cajas"]) for item in st.session_state.pedido)
+
+    st.sidebar.success(
+        f"{len(st.session_state.pedido)} productos | {total_cajas_sidebar} cajas"
+    )
+
+    for idx, item in enumerate(st.session_state.pedido):
+        st.sidebar.markdown(
+            f"**{item['descripcion']}**  \n"
+            f"{item['cajas']} cajas · {euros(item['precio'])} €"
+        )
+
+        nueva_cantidad = st.sidebar.number_input(
+            "Cajas",
+            min_value=1,
+            value=int(item["cajas"]),
+            step=1,
+            key=f"side_cajas_{idx}",
+            label_visibility="collapsed"
+        )
+
+        st.session_state.pedido[idx]["cajas"] = int(nueva_cantidad)
+
+        if st.sidebar.button("Quitar", key=f"side_quitar_{idx}"):
+            boton_id_quitar = f"{item.get('codigo')}_{item.get('tarifa')}"
+
+            if boton_id_quitar in st.session_state.productos_anadidos:
+                st.session_state.productos_anadidos.remove(boton_id_quitar)
+
+            st.session_state.pedido.pop(idx)
+            st.rerun()
+
+        st.sidebar.markdown("---")
+
+    texto_sidebar = crear_texto_pedido(st.session_state.cliente, st.session_state.pedido)
+    url_sidebar = "https://wa.me/?text=" + quote(texto_sidebar)
+
+    st.sidebar.link_button("Finalizar pedido", url_sidebar)
+
+    if st.sidebar.button("Guardar pedido"):
+        guardar_pedido_historico()
+        st.sidebar.success("Pedido guardado")
+
+    if st.sidebar.button("Vaciar pedido"):
+        st.session_state.pedido = []
+        st.session_state.productos_anadidos = set()
+        st.rerun()
+
+else:
+    st.sidebar.info("Pedido vacío")
+
+
+# =========================
+# PEDIDO EN PANTALLA
+# =========================
 
 st.markdown("### 🧾 Pedido")
 
@@ -595,11 +749,13 @@ if st.session_state.pedido:
                     key=f"edit_cajas_{idx}",
                     label_visibility="collapsed"
                 )
+
                 st.session_state.pedido[idx]["cajas"] = int(nueva_cantidad)
 
             with col2:
                 if st.button("Quitar", key=f"quitar_{idx}"):
                     boton_id_quitar = f"{item.get('codigo')}_{item.get('tarifa')}"
+
                     if boton_id_quitar in st.session_state.productos_anadidos:
                         st.session_state.productos_anadidos.remove(boton_id_quitar)
 
@@ -632,6 +788,10 @@ else:
     st.info("Pedido vacío")
 
 
+# =========================
+# BUSCADOR
+# =========================
+
 busqueda = st.text_input("Buscar", placeholder="Ej: anilla, atún, calamar...")
 
 if busqueda:
@@ -648,6 +808,10 @@ else:
         st.caption("Mostrando primeros 30 productos. Usa el buscador para filtrar.")
         resultados = df.head(30).reset_index(drop=True)
 
+
+# =========================
+# LISTA PRODUCTOS
+# =========================
 
 if resultados.empty:
     st.warning("No se encontró ningún producto")
@@ -708,3 +872,27 @@ else:
                 st.rerun()
 
         st.markdown("---")
+
+
+# =========================
+# BOTÓN FIJO ABAJO
+# =========================
+
+if st.session_state.pedido:
+    texto_footer = crear_texto_pedido(st.session_state.cliente, st.session_state.pedido)
+    url_footer = "https://wa.me/?text=" + quote(texto_footer)
+
+    total_cajas_footer = sum(int(item["cajas"]) for item in st.session_state.pedido)
+
+    st.markdown(
+        f"""
+        <div class="footer-finalizar">
+            <a href="{url_footer}" target="_blank">
+                <button>
+                    Finalizar pedido · {len(st.session_state.pedido)} productos · {total_cajas_footer} cajas
+                </button>
+            </a>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
