@@ -15,21 +15,31 @@ st.set_page_config(
     layout="centered"
 )
 
-# =========================
-# LOGO + TÍTULO
-# =========================
 
-try:
-    st.image("logo.jpg", width=180)
-except Exception:
-    pass
+def mostrar_logo():
+    posibles_logos = ["logo.jpg", "logo.jpeg", "logo.png"]
 
-st.markdown("### Tarifa Pescados Pardo")
+    for logo in posibles_logos:
+        ruta = Path(logo)
+        if ruta.exists():
+            img_base64 = base64.b64encode(ruta.read_bytes()).decode()
+            extension = ruta.suffix.replace(".", "").lower()
+            mime = "jpeg" if extension in ["jpg", "jpeg"] else "png"
+
+            st.markdown(
+                f"""
+                <div style="text-align:center; margin-top:25px; margin-bottom:20px;">
+                    <img src="data:image/{mime};base64,{img_base64}"
+                         style="max-width:220px; width:70%; height:auto;">
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+            return
 
 
-# =========================
-# ESTILO BLANCO / NEGRO
-# =========================
+mostrar_logo()
+
 
 st.markdown("""
 <style>
@@ -85,7 +95,7 @@ a[data-testid="stBaseButton-secondary"] {
 }
 
 .block-container {
-    padding-top: 0.6rem;
+    padding-top: 0.3rem;
     padding-bottom: 5rem;
 }
 
@@ -141,10 +151,6 @@ hr {
 """, unsafe_allow_html=True)
 
 
-# =========================
-# TARIFAS
-# =========================
-
 TARIFAS = {
     "1": "PRECIO",
     "2": "CLIENTE FINAL",
@@ -160,10 +166,6 @@ NOMBRES_TARIFAS = {
 }
 
 
-# =========================
-# SECRETS GITHUB
-# =========================
-
 def get_secret(nombre, defecto=""):
     try:
         return st.secrets.get(nombre, defecto)
@@ -177,10 +179,6 @@ GITHUB_BRANCH = get_secret("GITHUB_BRANCH", "main")
 FAVORITOS_PATH = get_secret("FAVORITOS_PATH", "favoritos.json")
 PEDIDOS_PATH = get_secret("PEDIDOS_PATH", "pedidos.json")
 
-
-# =========================
-# FUNCIONES BASE
-# =========================
 
 def buscar_excel_tarifa():
     archivos = list(Path(".").glob("*.xlsx")) + list(Path(".").glob("*.xls"))
@@ -237,10 +235,6 @@ def crear_texto_pedido(cliente, pedido):
 
     return "\n".join(lineas)
 
-
-# =========================
-# GITHUB JSON
-# =========================
 
 def github_headers():
     return {
@@ -372,10 +366,6 @@ def productos_favoritos(df, n_cliente):
     return df_fav.sort_values("ORDEN_FAVORITO").drop(columns=["ORDEN_FAVORITO"])
 
 
-# =========================
-# CARGA EXCEL
-# =========================
-
 def cargar_clientes():
     archivo = buscar_excel_clientes()
 
@@ -432,10 +422,6 @@ def cargar_tarifa():
 
     return df
 
-
-# =========================
-# PEDIDOS
-# =========================
 
 def agregar_al_pedido(item_nuevo):
     for item in st.session_state.pedido:
@@ -513,10 +499,6 @@ def recalcular_pedido_con_tarifa_actual(pedido, df, tarifa_visible):
     return pedido_recalculado
 
 
-# =========================
-# ESTADO
-# =========================
-
 if "logueado" not in st.session_state:
     st.session_state.logueado = False
 
@@ -536,16 +518,18 @@ if "productos_anadidos" not in st.session_state:
     st.session_state.productos_anadidos = set()
 
 
-# =========================
-# LOGIN
-# =========================
-
 if not st.session_state.logueado:
     st.markdown("### Tarifa Pescados Pardo")
 
+    cliente_recordado = ""
+    try:
+        cliente_recordado = st.query_params.get("cliente", "")
+    except Exception:
+        cliente_recordado = ""
+
     n_cliente = st.text_input(
         "Nº cliente",
-        value=st.session_state.get("n_cliente_login", "")
+        value=st.session_state.get("n_cliente_login", cliente_recordado)
     )
 
     password = st.text_input("Contraseña", type="password")
@@ -571,18 +555,20 @@ if not st.session_state.logueado:
             st.session_state.pedido = []
             st.session_state.productos_anadidos = set()
 
+            try:
+                st.query_params["cliente"] = str(usuario["N_CLIENTE"])
+            except Exception:
+                pass
+
             st.rerun()
 
+    st.caption("La contraseña puede guardarla el navegador si aceptas guardar contraseña.")
     st.stop()
 
 
-# =========================
-# APP
-# =========================
-
 df = cargar_tarifa()
 
-st.success(f"Cliente: {st.session_state.cliente}")
+st.success(f"Hola, {st.session_state.cliente}")
 
 if st.button("Cerrar sesión"):
     st.session_state.logueado = False
@@ -593,10 +579,6 @@ if st.button("Cerrar sesión"):
     st.session_state.productos_anadidos = set()
     st.rerun()
 
-
-# =========================
-# TARIFA
-# =========================
 
 tarifa_cliente = st.session_state.tarifa_cliente
 
@@ -617,10 +599,6 @@ if tarifa_visible not in TARIFAS:
 
 col_precio = TARIFAS[tarifa_visible]
 
-
-# =========================
-# SIDEBAR CARRITO
-# =========================
 
 st.sidebar.markdown("## 🧾 Pedido")
 
@@ -659,11 +637,6 @@ if st.session_state.pedido:
 
         st.sidebar.markdown("---")
 
-    texto_sidebar = crear_texto_pedido(st.session_state.cliente, st.session_state.pedido)
-    url_sidebar = "https://wa.me/?text=" + quote(texto_sidebar)
-
-    st.sidebar.link_button("Finalizar pedido", url_sidebar)
-
     if st.sidebar.button("Guardar pedido"):
         guardar_pedido_historico()
         st.sidebar.success("Pedido guardado")
@@ -676,10 +649,6 @@ if st.session_state.pedido:
 else:
     st.sidebar.info("Pedido vacío")
 
-
-# =========================
-# PEDIDO EN PANTALLA
-# =========================
 
 st.markdown("### 🧾 Pedido")
 
@@ -709,7 +678,7 @@ historico_cliente = obtener_historico_cliente(st.session_state.n_cliente)
 if historico_cliente:
     with st.expander("Ver histórico de pedidos", expanded=False):
         for pedido_hist in reversed(historico_cliente[-5:]):
-            st.markdown(f"**{pedido_hist.get('fecha', '')}**")
+            st.markdown(f"**{pedido_hist.get('fecha', '')}")
             productos_hist = pedido_hist.get("productos", [])
 
             for item in productos_hist:
@@ -767,30 +736,12 @@ if st.session_state.pedido:
 
             st.markdown("---")
 
-    texto = crear_texto_pedido(st.session_state.cliente, st.session_state.pedido)
-    url = "https://wa.me/?text=" + quote(texto)
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.link_button("Finalizar pedido", url)
-
-    with col2:
-        if st.button("Guardar pedido"):
-            guardar_pedido_historico()
-            st.success("Pedido guardado en histórico")
-
-    if st.button("Vaciar pedido"):
-        st.session_state.pedido = []
-        st.session_state.productos_anadidos = set()
-        st.rerun()
+    if st.button("Guardar pedido"):
+        guardar_pedido_historico()
+        st.success("Pedido guardado en histórico")
 else:
     st.info("Pedido vacío")
 
-
-# =========================
-# BUSCADOR
-# =========================
 
 busqueda = st.text_input("Buscar", placeholder="Ej: anilla, atún, calamar...")
 
@@ -808,10 +759,6 @@ else:
         st.caption("Mostrando primeros 30 productos. Usa el buscador para filtrar.")
         resultados = df.head(30).reset_index(drop=True)
 
-
-# =========================
-# LISTA PRODUCTOS
-# =========================
 
 if resultados.empty:
     st.warning("No se encontró ningún producto")
@@ -873,10 +820,6 @@ else:
 
         st.markdown("---")
 
-
-# =========================
-# BOTÓN FIJO ABAJO
-# =========================
 
 if st.session_state.pedido:
     texto_footer = crear_texto_pedido(st.session_state.cliente, st.session_state.pedido)
