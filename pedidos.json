@@ -15,5 +15,30 @@
         }
       ]
     }
+  ],
+  "1396": [
+    {
+      "fecha": "2026-08-06 10:55:12",
+      "cliente": "SOCIEDAD FITERANA DE CONSUMO",
+      "n_cliente": "1396",
+      "productos": [
+        {
+          "cajas": 1,
+          "codigo": "54005081",
+          "descripcion": "GUISANTE FINO 20X400GR. FINDUS****",
+          "precio": 1.85,
+          "formato": "UNID",
+          "tarifa": "4"
+        },
+        {
+          "cajas": 1,
+          "codigo": "99100059",
+          "descripcion": "PREP.PAELLA S/V 12X400G.SILOMAR",
+          "precio": 3.45,
+          "formato": "UNID",
+          "tarifa": "4"
+        }
+      ]
+    }
   ]
 }
